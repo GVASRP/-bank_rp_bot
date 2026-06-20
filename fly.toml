@@ -1,0 +1,7 @@
+app = "bank-rp-bot"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  BOT_TOKEN = ""
