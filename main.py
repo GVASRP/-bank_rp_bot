@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -13,6 +15,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+async def health_check(request):
+    return web.Response(text="OK")
+
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    app.router.add_get("/health", health_check)
+    port = int(os.getenv("PORT", "8000"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info("Веб-сервер для хелс-чеков запущен на порту %d", port)
+
+
 async def main():
     logger.info("Инициализация базы данных...")
     await init_db()
@@ -24,6 +42,8 @@ async def main():
     bot = Bot(**kwargs)
     dp = Dispatcher()
     dp.include_router(router)
+
+    await run_web_server()
 
     logger.info("Бот запущен!")
     try:
