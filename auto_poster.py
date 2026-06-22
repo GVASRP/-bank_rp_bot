@@ -2,138 +2,110 @@ import asyncio
 import logging
 import random
 
+import aiohttp
+import feedparser
+
 from database import is_listing_posted, mark_listing_posted, get_config
 
 logger = logging.getLogger(__name__)
 
-CARS = [
-    ("Honda", "Civic"), ("Honda", "Accord"), ("Honda", "CR-V"), ("Honda", "Pilot"),
-    ("Toyota", "Camry"), ("Toyota", "Corolla"), ("Toyota", "RAV4"), ("Toyota", "Tacoma"),
-    ("Ford", "F-150"), ("Ford", "Escape"), ("Ford", "Explorer"), ("Ford", "Mustang"),
-    ("Chevrolet", "Silverado"), ("Chevrolet", "Equinox"), ("Chevrolet", "Tahoe"),
-    ("BMW", "3 Series"), ("BMW", "5 Series"), ("BMW", "X3"),
-    ("Mercedes-Benz", "C-Class"), ("Mercedes-Benz", "E-Class"), ("Mercedes-Benz", "GLC"),
-    ("Audi", "A4"), ("Audi", "Q5"), ("Audi", "Q7"),
-    ("Subaru", "Outback"), ("Subaru", "Forester"), ("Subaru", "Crosstrek"),
-    ("Jeep", "Wrangler"), ("Jeep", "Grand Cherokee"), ("Jeep", "Cherokee"),
-    ("Nissan", "Altima"), ("Nissan", "Rogue"), ("Nissan", "Frontier"),
-    ("Volkswagen", "Jetta"), ("Volkswagen", "Passat"), ("Volkswagen", "Tiguan"),
-    ("Hyundai", "Elantra"), ("Hyundai", "Tucson"), ("Hyundai", "Santa Fe"),
-    ("Kia", "Forte"), ("Kia", "Soul"), ("Kia", "Sorento"),
-    ("Mazda", "CX-5"), ("Mazda", "Mazda3"), ("Mazda", "CX-9"),
-    ("Dodge", "Charger"), ("Dodge", "Durango"), ("Ram", "1500"),
-    ("GMC", "Sierra"), ("GMC", "Yukon"), ("GMC", "Terrain"),
+WI_CITIES = [
+    ("milwaukee", "Милуоки"), ("madison", "Мадисон"), ("greenbay", "Грин-Бей"),
+    ("appleton-oshkosh-fdl", "Апплтон"), ("eauclaire", "О-Клэр"), ("kenosha-racine", "Кеноша"),
+    ("lacrosse", "Ла-Кросс"), ("sheboygan", "Шебойган"), ("wausau", "Восау"),
+    ("janesville", "Джейнсвилл"), ("northernwi", "Северный Висконсин"),
 ]
 
-YEARS = list(range(2014, 2026))
-
-MILES = {
-    2014: (80000, 160000), 2015: (70000, 140000), 2016: (60000, 130000),
-    2017: (50000, 120000), 2018: (40000, 100000), 2019: (30000, 90000),
-    2020: (20000, 80000), 2021: (15000, 60000), 2022: (10000, 45000),
-    2023: (5000, 30000), 2024: (1000, 15000), 2025: (100, 5000),
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
-WI_CITIES = [
-    ("Милуоки", "Milwaukee, WI"), ("Мадисон", "Madison, WI"), ("Грин-Бей", "Green Bay, WI"),
-    ("Апплтон", "Appleton, WI"), ("О-Клэр", "Eau Claire, WI"), ("Кеноша", "Kenosha, WI"),
-    ("Расин", "Racine, WI"), ("Ла-Кросс", "La Crosse, WI"), ("Шебойган", "Sheboygan, WI"),
-    ("Восау", "Wausau, WI"), ("Джейнсвилл", "Janesville, WI"), ("Фонд-дю-Лак", "Fond du Lac, WI"),
-]
 
-CONDITIONS = [
-    "отличное состояние", "хорошее состояние", "очень хорошее состояние",
-    "обслужена", "в идеале", "без нареканий", "ездит отлично",
-]
-
-FEATURES = [
-    "ABS, подушки безопасности", "климат-контроль", "подогрев сидений",
-    "Bluetooth, AUX", "камера заднего вида", "кожаный салон",
-    "полный привод (AWD)", "передний привод (FWD)", "люк", "парктроники",
-    "бесключевой доступ", "круиз-контроль", "CarPlay/Android Auto",
-    "сигнализация", "тонировка", "новые шины", "чистый салон",
-]
-
-TITLES = ["чистый", "в наличии", "срочно", "торг уместен", "обмен не интересует"]
+async def fetch_rss(city_slug: str) -> list:
+    url = f"https://{city_slug}.craigslist.org/search/cta?format=rss&s=0"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=HEADERS, timeout=15) as resp:
+            if resp.status != 200:
+                logger.warning("HTTP %s for %s", resp.status, city_slug)
+                return []
+            text = await resp.text()
+    feed = feedparser.parse(text)
+    return [e for e in feed.entries if e.get("title")]
 
 
-def generate_car() -> dict:
-    make, model = random.choice(CARS)
-    year = random.choice(YEARS)
-    miles_range = MILES.get(year, (30000, 100000))
-    miles = random.randint(*miles_range)
-    base_price = {
-        2014: 5000, 2015: 7000, 2016: 9000, 2017: 11000,
-        2018: 14000, 2019: 17000, 2020: 20000, 2021: 24000,
-        2022: 28000, 2023: 32000, 2024: 38000, 2025: 45000,
-    }.get(year, 15000)
-    price = base_price + random.randint(-3000, 5000)
-    price = max(1000, price)
-    city_ru, city_en = random.choice(WI_CITIES)
-    condition = random.choice(CONDITIONS)
-    features = random.sample(FEATURES, k=random.randint(3, 6))
-    title = random.choice(TITLES)
-
-    description = (
-        f"{make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
-        f"{' • '.join(features)}. {title.capitalize()}. "
-        f"Звоните, пишите — покажу, расскажу."
-    )
-
-    vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
-
-    return {
-        "make": make,
-        "model": model,
-        "year": year,
-        "miles": miles,
-        "price": price,
-        "city_ru": city_ru,
-        "city_en": city_en,
-        "condition": condition,
-        "features": features,
-        "description": description,
-        "vin": vin,
-        "guid": f"gen_{vin}_{random.randint(1000,9999)}",
-    }
+def extract_price(text: str) -> str:
+    m = __import__("re").search(r'\$[\d,]+', text)
+    return m.group(0) if m else ""
 
 
-def format_car(car: dict) -> str:
-    price_str = f"${car['price']:,}"
-    miles_str = f"{car['miles']:,} миль"
-    return (
-        f"🚗 <b>{car['year']} {car['make']} {car['model']}</b>\n"
-        f"📍 {car['city_ru']}, WI\n"
-        f"💰 {price_str} | {miles_str}\n"
-        f"📝 {car['description'][:200]}\n"
-        f"🆔 VIN: {car['vin']}"
-    )
+def format_entry(entry, city_name: str) -> str | None:
+    title = entry.get("title", "").strip()
+    link = entry.get("link", "")
+    summary = entry.get("summary", "")
+    price = extract_price(title)
+    desc = summary
+    if not title:
+        return None
+    msg = f"🚗 <b>{title}</b>\n📍 {city_name}, WI\n"
+    if price:
+        msg += f"💰 {price}\n"
+    if desc:
+        msg += f"📝 {desc[:200]}\n"
+    msg += f"🔗 {link}"
+    return msg
 
 
 async def post_new_car(bot, chat_id: int) -> bool:
-    for _ in range(5):
-        car = generate_car()
-        if not await is_listing_posted(car["guid"]):
-            text = format_car(car)
+    cities = WI_CITIES.copy()
+    random.shuffle(cities)
+
+    for city_slug, city_name in cities:
+        try:
+            entries = await fetch_rss(city_slug)
+        except Exception as e:
+            logger.debug("Fetch error %s: %s", city_slug, e)
+            continue
+
+        for entry in entries:
+            guid = entry.get("id") or entry.get("link", "")
+            if not guid or await is_listing_posted(guid):
+                continue
+            text = format_entry(entry, city_name)
+            if not text:
+                continue
             try:
-                await bot.send_message(chat_id, text, parse_mode="HTML")
-                await mark_listing_posted(car["guid"])
+                await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+                await mark_listing_posted(guid)
                 return True
             except Exception as e:
                 logger.error("Send error: %s", e)
                 return False
+
     return False
 
 
 async def force_post_one(bot, chat_id: int) -> str:
-    car = generate_car()
-    text = format_car(car)
-    try:
-        await bot.send_message(chat_id, text, parse_mode="HTML")
-        await mark_listing_posted(car["guid"])
-        return f"✅ {car['year']} {car['make']} {car['model']} — {car['city_ru']}"
-    except Exception as e:
-        return f"❌ Ошибка: {e}"
+    random.shuffle(WI_CITIES)
+    for city_slug, city_name in WI_CITIES[:3]:
+        try:
+            entries = await fetch_rss(city_slug)
+        except Exception as e:
+            continue
+        for entry in entries:
+            guid = entry.get("id") or entry.get("link", "")
+            text = format_entry(entry, city_name)
+            if not text:
+                continue
+            try:
+                await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+                if guid:
+                    await mark_listing_posted(guid)
+                return f"✅ {entry.get('title','')[:60]} — {city_name}"
+            except Exception as e:
+                return f"❌ Ошибка: {e}"
+    return "❌ Нет объявлений (проверь интернет или Craigslist блокирует)"
 
 
 async def auto_poster_loop(bot):
@@ -152,7 +124,9 @@ async def auto_poster_loop(bot):
 
             if now - last_post >= interval * 60:
                 chat_id = int(chat_id_raw)
-                await post_new_car(bot, chat_id)
+                ok = await post_new_car(bot, chat_id)
+                if not ok:
+                    logger.info("No new car listings found this cycle")
                 last_post = now
 
         await asyncio.sleep(TICK)
