@@ -19,7 +19,7 @@ from database import (
     get_all_deposits,
     create_deposit_account,
 )
-from utils import format_amount, parse_amount, is_admin, get_user_mention, resolve_target
+from utils import calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
 
 router = Router()
 
@@ -371,11 +371,11 @@ async def cmd_all_deposits(message: Message):
     for d in deposits:
         user = await get_user_by_telegram_id(d["user_telegram_id"])
         name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
-        payout = d["amount"] + (d["amount"] * d["interest_rate"] // 100)
+        payout, interest = calc_deposit_payout(d)
         lines.append(
             f"#{d['id']} — {name}\n"
-            f"   Сумма: {format_amount(d['amount'])} | %: {d['interest_rate']}%\n"
-            f"   К выплате: <b>{format_amount(payout)}</b> долларов"
+            f"   Сумма: {format_amount(d['amount'])} | %: {d['interest_rate']}%/год\n"
+            f"   Начислено: +{format_amount(interest)} | К выплате: <b>{format_amount(payout)}</b>"
         )
 
     await message.reply("\n".join(lines), parse_mode="HTML")

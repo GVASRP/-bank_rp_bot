@@ -4,12 +4,12 @@ from aiogram.types import Message
 
 from database import (
     get_or_create_user,
+    get_user_balance,
     update_balance,
     add_transaction,
     get_transactions,
+    get_top_users,
     create_credit_request,
-    create_deposit_request,
-    get_all_users_ranked,
     get_user_credits,
     get_credit_by_id,
     repay_credit,
@@ -17,7 +17,7 @@ from database import (
     get_deposit_by_id,
     withdraw_deposit,
 )
-from utils import format_amount, parse_amount, resolve_target
+from utils import calc_deposit_payout, format_amount, parse_amount, resolve_target
 
 router = Router()
 
@@ -280,11 +280,11 @@ async def cmd_my_deposits(message: Message):
 
     lines = ["🏛 <b>Ваши вклады:</b>\n"]
     for d in deposits:
-        payout = d["amount"] + (d["amount"] * d["interest_rate"] // 100)
+        payout, interest = calc_deposit_payout(d)
         lines.append(
             f"#{d['id']} — <b>{format_amount(d['amount'])}</b> долларов\n"
-            f"   Процент: {d['interest_rate']}% | К выплате: {format_amount(payout)}\n"
-            f"   Статус: <b>активен</b>"
+            f"   Ставка: {d['interest_rate']}%/год | Начислено: +{format_amount(interest)}\n"
+            f"   Текущая сумма: <b>{format_amount(payout)}</b>"
         )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
@@ -314,14 +314,15 @@ async def cmd_withdraw_deposit(message: Message):
         await message.reply("❌ Вклад уже выведен")
         return
 
-    payout = deposit["amount"] + (deposit["amount"] * deposit["interest_rate"] // 100)
+    payout, interest = calc_deposit_payout(deposit)
     await withdraw_deposit(deposit_id)
     await update_balance(message.from_user.id, payout)
-    await add_transaction("withdraw", None, message.from_user.id, payout, f"Вывод вклада #{deposit_id}")
+    await add_transaction("withdraw", None, message.from_user.id, payout, f"Вывод вклада #{deposit_id} (начислено %: {interest})")
 
     await message.reply(
         f"✅ Вклад #{deposit_id} выведен!\n"
-        f"Сумма: <b>{format_amount(deposit['amount'])}</b> + проценты <b>{format_amount(payout - deposit['amount'])}</b>\n"
+        f"Сумма: <b>{format_amount(deposit['amount'])}</b>\n"
+        f"Начислено процентов: <b>+{format_amount(interest)}</b>\n"
         f"Итого получено: <b>{format_amount(payout)}</b> долларов",
         parse_mode="HTML",
     )

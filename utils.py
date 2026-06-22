@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message
@@ -66,3 +68,17 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
 
 def get_user_mention(user_id: int, first_name: str = "Пользователь") -> str:
     return f"<a href='tg://user?id={user_id}'>{first_name}</a>"
+
+
+def calc_deposit_payout(deposit: dict) -> tuple:
+    try:
+        created = datetime.strptime(deposit["created_at"], "%Y-%m-%d %H:%M:%S")
+        delta = datetime.now() - created
+        days_held = delta.total_seconds() / 86400
+        if days_held < 1:
+            days_held = 1
+        interest = int(deposit["amount"] * deposit["interest_rate"] * days_held / 36500)
+    except (ValueError, KeyError):
+        interest = 0
+    payout = deposit["amount"] + interest
+    return payout, interest
