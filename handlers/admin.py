@@ -179,10 +179,14 @@ async def cmd_approve_credit(message: Message):
         await message.reply(f"❌ Заявка #{request_id} уже обработана (статус: {request['status']})")
         return
 
-    await update_credit_request(request_id, "approved")
-    credit_id = await create_credit(request["user_telegram_id"], request["amount"], interest, duration_days)
-    await update_balance(request["user_telegram_id"], request["amount"])
-    await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%, {duration_days}д)")
+    try:
+        credit_id = await create_credit(request["user_telegram_id"], request["amount"], interest, duration_days)
+        await update_balance(request["user_telegram_id"], request["amount"])
+        await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%, {duration_days}д)")
+        await update_credit_request(request_id, "approved")
+    except Exception as e:
+        await message.reply(f"❌ Ошибка при одобрении кредита: {e}")
+        return
 
     await message.reply(
         f"✅ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"

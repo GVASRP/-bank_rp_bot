@@ -11,10 +11,14 @@ _pg_conn = None
 async def get_conn():
     global _pg_conn
     if _is_pg:
-        if _pg_conn is None:
-            import asyncpg
-            _pg_conn = await asyncpg.connect(DATABASE_URL)
-        return _pg_conn
+        try:
+            if _pg_conn is None or _pg_conn.is_closed():
+                import asyncpg
+                _pg_conn = await asyncpg.connect(DATABASE_URL)
+            return _pg_conn
+        except Exception:
+            _pg_conn = None
+            raise
     else:
         import aiosqlite
         db = await aiosqlite.connect(DATABASE_FILE)
@@ -512,8 +516,8 @@ async def repay_credit(credit_id: int, amount: int) -> bool:
             interest_due = debt_info["interest_due"]
             pay_interest = min(amount, interest_due)
             pay_principal = amount - pay_interest
-            new_interest_paid = credit["interest_paid"] + pay_interest
-            new_remaining = credit["remaining_principal"] - pay_principal
+            new_interest_paid = (credit.get("interest_paid") or 0) + pay_interest
+            new_remaining = (credit.get("remaining_principal") or credit.get("remaining", credit["amount"])) - pay_principal
             if new_remaining <= 0:
                 await conn.execute(
                     "UPDATE credits SET remaining_principal = 0, interest_paid = $1, status = 'paid' WHERE id = $2",
@@ -536,8 +540,8 @@ async def repay_credit(credit_id: int, amount: int) -> bool:
             interest_due = debt_info["interest_due"]
             pay_interest = min(amount, interest_due)
             pay_principal = amount - pay_interest
-            new_interest_paid = credit["interest_paid"] + pay_interest
-            new_remaining = credit["remaining_principal"] - pay_principal
+            new_interest_paid = (credit.get("interest_paid") or 0) + pay_interest
+            new_remaining = (credit.get("remaining_principal") or credit.get("remaining", credit["amount"])) - pay_principal
             if new_remaining <= 0:
                 await conn.execute(
                     "UPDATE credits SET remaining_principal = 0, interest_paid = ?, status = 'paid' WHERE id = ?",
