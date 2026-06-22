@@ -4,11 +4,10 @@ from aiogram.types import Message
 
 from database import (
     get_or_create_user,
-    get_user_balance,
     update_balance,
     add_transaction,
     get_transactions,
-    get_top_users,
+    get_all_users_ranked,
     create_credit_request,
     get_user_credits,
     get_credit_by_id,
