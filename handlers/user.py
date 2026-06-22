@@ -9,13 +9,14 @@ from database import (
     get_transactions,
     create_credit_request,
     create_deposit_request,
+    get_all_users_ranked,
 )
 from utils import format_amount, parse_amount, resolve_target
 
 router = Router()
 
 
-@router.message(Command("баланс"))
+@router.message(Command("баланс", prefixes="!"))
 async def cmd_balance(message: Message):
     user = await get_or_create_user(
         message.from_user.id,
@@ -25,20 +26,20 @@ async def cmd_balance(message: Message):
     await message.reply(f"💰 Ваш баланс: <b>{format_amount(user['balance'])}</b> монет", parse_mode="HTML")
 
 
-@router.message(Command("перевести"))
+@router.message(Command("перевести", prefixes="!"))
 async def cmd_transfer(message: Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.reply(
-            "❌ Использование: <code>/перевести @user сумма</code>\n"
-            "Или ответь на сообщение пользователя: <code>/перевести сумма</code>",
+            "❌ Использование: <code>!перевести @user сумма</code>\n"
+            "Или ответь на сообщение пользователя: <code>!перевести сумма</code>",
             parse_mode="HTML",
         )
         return
 
     amount = parse_amount(args[2])
     if amount is None:
-        await message.reply("❌ Укажите корректную сумму (целое положительное число)", parse_mode="HTML")
+        await message.reply("❌ Укажите корректную сумму", parse_mode="HTML")
         return
 
     target_id, target_name, hint = await resolve_target(message, args)
@@ -78,7 +79,7 @@ async def cmd_transfer(message: Message):
     )
 
 
-@router.message(Command("история"))
+@router.message(Command("история", prefixes="!"))
 async def cmd_history(message: Message):
     await get_or_create_user(
         message.from_user.id,
@@ -92,29 +93,45 @@ async def cmd_history(message: Message):
 
     lines = ["📜 <b>История операций (последние 15):</b>\n"]
     for t in transactions:
-        sign = "+" if t["receiver_telegram_id"] == message.from_user.id else "-"
         if t["type"] == "transfer":
             lines.append(
                 f"{'📤' if t['sender_telegram_id'] == message.from_user.id else '📥'} "
-                f"{sign}{format_amount(t['amount'])} — {t['created_at']}"
+                f"{t['created_at']}"
             )
         elif t["type"] == "credit":
-            lines.append(f"💰 +{format_amount(t['amount'])} (кредит) — {t['created_at']}")
+            lines.append(f"💰 Кредит одобрен: +{format_amount(t['amount'])} — {t['created_at']}")
         elif t["type"] == "deposit":
-            lines.append(f"🏦 -{format_amount(t['amount'])} (вклад) — {t['created_at']}")
+            lines.append(f"🏦 Вклад: -{format_amount(t['amount'])} — {t['created_at']}")
         elif t["type"] == "admin_add":
-            lines.append(f"💳 +{format_amount(t['amount'])} (начислено) — {t['created_at']}")
+            lines.append(f"💳 Начислено: +{format_amount(t['amount'])} — {t['created_at']}")
         elif t["type"] == "admin_remove":
-            lines.append(f"💳 -{format_amount(t['amount'])} (списано) — {t['created_at']}")
+            lines.append(f"💳 Списано: -{format_amount(t['amount'])} — {t['created_at']}")
 
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("запросить_кредит"))
+@router.message(Command("рейтинг", prefixes="!"))
+async def cmd_ranking(message: Message):
+    users = await get_all_users_ranked()
+    if not users:
+        await message.reply("📭 Пока нет зарегистрированных пользователей")
+        return
+
+    lines = ["🏆 <b>Таблица лидеров:</b>\n"]
+    medals = ["🥇", "🥈", "🥉"]
+    for i, user in enumerate(users, 1):
+        prefix = medals[i - 1] if i <= 3 else f"{i}."
+        name = user.get("first_name") or user.get("username") or f"ID {user['telegram_id']}"
+        lines.append(f"{prefix} {name} — <b>{format_amount(user['balance'])}</b> монет")
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("запросить_кредит", prefixes="!"))
 async def cmd_request_credit(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>/запросить_кредит сумма</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!запросить_кредит сумма</code>", parse_mode="HTML")
         return
 
     amount = parse_amount(args[1])
@@ -131,11 +148,11 @@ async def cmd_request_credit(message: Message):
     )
 
 
-@router.message(Command("запросить_вклад"))
+@router.message(Command("запросить_вклад", prefixes="!"))
 async def cmd_request_deposit(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>/запросить_вклад сумма</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!запросить_вклад сумма</code>", parse_mode="HTML")
         return
 
     amount = parse_amount(args[1])

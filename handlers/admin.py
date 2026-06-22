@@ -10,8 +10,10 @@ from database import (
     add_transaction,
     get_credit_request,
     update_credit_request,
+    get_credit_requests,
     get_deposit_request,
     update_deposit_request,
+    get_deposit_requests,
 )
 from utils import format_amount, parse_amount, is_admin, get_user_mention, resolve_target
 
@@ -29,14 +31,14 @@ async def ensure_admin(message: Message) -> bool:
     return True
 
 
-@router.message(Command("начислить"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("начислить", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_add_balance(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
-        await message.reply("❌ Использование: <code>/начислить @user сумма</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!начислить @user сумма</code>", parse_mode="HTML")
         return
 
     amount = parse_amount(args[2])
@@ -59,14 +61,14 @@ async def cmd_add_balance(message: Message):
     )
 
 
-@router.message(Command("списать"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("списать", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_remove_balance(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
-        await message.reply("❌ Использование: <code>/списать @user сумма</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!списать @user сумма</code>", parse_mode="HTML")
         return
 
     amount = parse_amount(args[2])
@@ -96,14 +98,14 @@ async def cmd_remove_balance(message: Message):
     )
 
 
-@router.message(Command("установить_баланс"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("установить_баланс", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_set_balance(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
-        await message.reply("❌ Использование: <code>/установить_баланс @user сумма</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!установить_баланс @user сумма</code>", parse_mode="HTML")
         return
 
     amount = parse_amount(args[2])
@@ -127,14 +129,14 @@ async def cmd_set_balance(message: Message):
     )
 
 
-@router.message(Command("одобрить_кредит"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("одобрить_кредит", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_approve_credit(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>/одобрить_кредит id</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!одобрить_кредит id</code>", parse_mode="HTML")
         return
 
     try:
@@ -162,14 +164,14 @@ async def cmd_approve_credit(message: Message):
     )
 
 
-@router.message(Command("отклонить_кредит"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("отклонить_кредит", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_reject_credit(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>/отклонить_кредит id</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!отклонить_кредит id</code>", parse_mode="HTML")
         return
 
     try:
@@ -194,14 +196,14 @@ async def cmd_reject_credit(message: Message):
     )
 
 
-@router.message(Command("одобрить_вклад"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("одобрить_вклад", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_approve_deposit(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>/одобрить_вклад id</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!одобрить_вклад id</code>", parse_mode="HTML")
         return
 
     try:
@@ -238,14 +240,14 @@ async def cmd_approve_deposit(message: Message):
     )
 
 
-@router.message(Command("отклонить_вклад"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("отклонить_вклад", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_reject_deposit(message: Message):
     if not await ensure_admin(message):
         return
 
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>/отклонить_вклад id</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!отклонить_вклад id</code>", parse_mode="HTML")
         return
 
     try:
@@ -270,12 +272,10 @@ async def cmd_reject_deposit(message: Message):
     )
 
 
-@router.message(Command("заявки"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("заявки", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_list_requests(message: Message):
     if not await ensure_admin(message):
         return
-
-    from database import get_credit_requests, get_deposit_requests
 
     credits = await get_credit_requests("pending")
     deposits = await get_deposit_requests("pending")

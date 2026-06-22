@@ -394,3 +394,17 @@ async def update_deposit_request(request_id: int, status: str) -> None:
     finally:
         if not _is_pg:
             await conn.close()
+
+
+async def get_all_users_ranked() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM users ORDER BY balance DESC")
+        else:
+            cursor = await conn.execute("SELECT * FROM users ORDER BY balance DESC")
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
