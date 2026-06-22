@@ -199,8 +199,8 @@ async def cmd_my_credits(message: Message):
         info = calc_credit_debt(c)
         lines.append(
             f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов | {c['interest_rate']}%/год\n"
-            f"   Остаток тела: {format_amount(info['remaining_principal'])}\n"
-            f"   Начислено процентов: +{format_amount(info['total_interest'])} | Оплачено: {format_amount(info['interest_paid'])}\n"
+            f"   Срок: {c['duration_days']} дн. | Остаток тела: {format_amount(info['remaining_principal'])}\n"
+            f"   % начислено: +{format_amount(info['total_interest'])} | Оплачено: {format_amount(info['interest_paid'])}\n"
             f"   Долг на сейчас: <b>{format_amount(info['total_debt'])}</b>"
         )
 
