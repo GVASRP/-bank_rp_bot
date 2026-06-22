@@ -21,6 +21,7 @@ from database import (
     get_config,
     set_config,
 )
+from auto_poster import force_post_one
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
 
 router = Router()
@@ -407,7 +408,7 @@ CITY_NAMES = {
     "sfbay": "Сан-Франциско", "boston": "Бостон", "denver": "Денвер",
     "lasvegas": "Лас-Вегас", "portland": "Портленд", "atlanta": "Атланта",
     "wisconsin": "Весь Висконсин",
-    "appleton": "Апплтон", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
+    "appleton-oshkosh-fdl": "Апплтон (Fox Cities)", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
     "janesville": "Джейнсвилл", "kenosha-racine": "Кеноша-Расин", "lacrosse": "Ла-Кросс",
     "madison": "Мадисон", "milwaukee": "Милуоки", "sheboygan": "Шебойган",
     "wausau": "Восау", "northernwi": "Северный Висконсин",
@@ -435,7 +436,8 @@ async def cmd_auto_posts(message: Message):
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
             f"<code>!объявления город wisconsin</code> — весь Висконсин\n"
-            f"<code>!объявления интервал 120</code> — интервал в минутах\n\n"
+            f"<code>!объявления интервал 1</code> — интервал в минутах\n"
+            f"<code>!объявления тест</code> — принудительно показать 1 объявление\n\n"
             f"🚗 Постит реальные объявления о продаже машин с Craigslist",
             parse_mode="HTML",
         )
@@ -467,5 +469,9 @@ async def cmd_auto_posts(message: Message):
             await message.reply(f"✅ Интервал: {minutes} минут")
         except ValueError:
             await message.reply("❌ Укажите число минут")
+    elif action == "тест":
+        city = await get_config("poster_city") or "newyork"
+        result = await force_post_one(message.bot, message.chat.id, city)
+        await message.reply(result, parse_mode="HTML")
     else:
-        await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, город, интервал")
+        await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, город, интервал, тест")

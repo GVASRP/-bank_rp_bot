@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 WISCONSIN_CITIES = [
-    "appleton", "eauclaire", "greenbay", "janesville",
+    "appleton-oshkosh-fdl", "eauclaire", "greenbay", "janesville",
     "kenosha-racine", "lacrosse", "madison", "milwaukee",
     "sheboygan", "wausau", "northernwi",
 ]
@@ -24,7 +24,7 @@ CITY_NAMES = {
     "sfbay": "Сан-Франциско", "boston": "Бостон", "denver": "Денвер",
     "lasvegas": "Лас-Вегас", "portland": "Портленд", "atlanta": "Атланта",
     "wisconsin": "Висконсин",
-    "appleton": "Апплтон", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
+    "appleton-oshkosh-fdl": "Апплтон (Fox Cities)", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
     "janesville": "Джейнсвилл", "kenosha-racine": "Кеноша-Расин", "lacrosse": "Ла-Кросс",
     "madison": "Мадисон", "milwaukee": "Милуоки", "sheboygan": "Шебойган",
     "wausau": "Восау", "northernwi": "Северный Висконсин",
@@ -93,6 +93,37 @@ async def post_new_listings(bot, chat_id: int, city: str, city_name: str, max_co
             await asyncio.sleep(2)
         except Exception as e:
             logger.error("Send error: %s", e)
+
+    return posted
+
+
+async def force_post_one(bot, chat_id: int, city: str) -> str:
+    city_name = CITY_NAMES.get(city, city)
+    if city == "wisconsin":
+        city = WISCONSIN_CITIES[0]
+        city_name = CITY_NAMES.get(city, city)
+    try:
+        entries = await fetch_entries(city)
+    except Exception as e:
+        return f"❌ Ошибка RSS ({city}): {e}"
+
+    fresh = [e for e in entries if e.get("id") or e.get("link")]
+    if not fresh:
+        return f"❌ Нет объявлений в городе {city_name}"
+
+    entry = fresh[0]
+    guid = entry.get("id") or entry.get("link", "")
+    text = format_listing(entry, city_name)
+    if not text:
+        return f"❌ Не удалось отформатировать объявление"
+
+    try:
+        await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+        if guid:
+            await mark_listing_posted(guid)
+        return f"✅ Объявление из {city_name} опубликовано!"
+    except Exception as e:
+        return f"❌ Ошибка отправки: {e}"
 
 
 async def auto_poster_loop(bot):
