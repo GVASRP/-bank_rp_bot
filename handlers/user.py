@@ -16,7 +16,7 @@ from utils import format_amount, parse_amount, resolve_target
 router = Router()
 
 
-@router.message(Command("баланс", prefixes="/!"))
+@router.message(Command("баланс", prefix="!/"))
 async def cmd_balance(message: Message):
     user = await get_or_create_user(
         message.from_user.id,
@@ -26,7 +26,7 @@ async def cmd_balance(message: Message):
     await message.reply(f"💰 Ваш баланс: <b>{format_amount(user['balance'])}</b> долларов", parse_mode="HTML")
 
 
-@router.message(Command("перевести", prefixes="/!"))
+@router.message(Command("перевести", prefix="!/"))
 async def cmd_transfer(message: Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
@@ -79,7 +79,7 @@ async def cmd_transfer(message: Message):
     )
 
 
-@router.message(Command("история", prefixes="/!"))
+@router.message(Command("история", prefix="!/"))
 async def cmd_history(message: Message):
     await get_or_create_user(
         message.from_user.id,
@@ -110,7 +110,7 @@ async def cmd_history(message: Message):
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("рейтинг", prefixes="/!"))
+@router.message(Command("рейтинг", prefix="!/"))
 async def cmd_ranking(message: Message):
     users = await get_all_users_ranked()
     if not users:
@@ -127,7 +127,7 @@ async def cmd_ranking(message: Message):
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("запросить_кредит", prefixes="/!"))
+@router.message(Command("запросить_кредит", prefix="!/"))
 async def cmd_request_credit(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
@@ -148,7 +148,7 @@ async def cmd_request_credit(message: Message):
     )
 
 
-@router.message(Command("запросить_вклад", prefixes="/!"))
+@router.message(Command("запросить_вклад", prefix="!/"))
 async def cmd_request_deposit(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:

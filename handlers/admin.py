@@ -31,7 +31,7 @@ async def ensure_admin(message: Message) -> bool:
     return True
 
 
-@router.message(Command("начислить", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("начислить", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_add_balance(message: Message):
     if not await ensure_admin(message):
         return
@@ -61,7 +61,7 @@ async def cmd_add_balance(message: Message):
     )
 
 
-@router.message(Command("списать", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("списать", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_remove_balance(message: Message):
     if not await ensure_admin(message):
         return
@@ -98,7 +98,7 @@ async def cmd_remove_balance(message: Message):
     )
 
 
-@router.message(Command("установить_баланс", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("установить_баланс", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_set_balance(message: Message):
     if not await ensure_admin(message):
         return
@@ -129,7 +129,7 @@ async def cmd_set_balance(message: Message):
     )
 
 
-@router.message(Command("одобрить_кредит", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("одобрить_кредит", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_approve_credit(message: Message):
     if not await ensure_admin(message):
         return
@@ -164,7 +164,7 @@ async def cmd_approve_credit(message: Message):
     )
 
 
-@router.message(Command("отклонить_кредит", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("отклонить_кредит", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_reject_credit(message: Message):
     if not await ensure_admin(message):
         return
@@ -196,7 +196,7 @@ async def cmd_reject_credit(message: Message):
     )
 
 
-@router.message(Command("одобрить_вклад", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("одобрить_вклад", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_approve_deposit(message: Message):
     if not await ensure_admin(message):
         return
@@ -240,7 +240,7 @@ async def cmd_approve_deposit(message: Message):
     )
 
 
-@router.message(Command("отклонить_вклад", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("отклонить_вклад", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_reject_deposit(message: Message):
     if not await ensure_admin(message):
         return
@@ -272,7 +272,7 @@ async def cmd_reject_deposit(message: Message):
     )
 
 
-@router.message(Command("заявки", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("заявки", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_list_requests(message: Message):
     if not await ensure_admin(message):
         return
