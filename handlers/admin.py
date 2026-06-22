@@ -406,10 +406,11 @@ CITY_NAMES = {
     "dallas": "Даллас", "miami": "Майами", "seattle": "Сиэтл",
     "sfbay": "Сан-Франциско", "boston": "Бостон", "denver": "Денвер",
     "lasvegas": "Лас-Вегас", "portland": "Портленд", "atlanta": "Атланта",
-    "appleton": "Апплтон (Fox Cities)", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
+    "wisconsin": "Весь Висконсин",
+    "appleton": "Апплтон", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
     "janesville": "Джейнсвилл", "kenosha-racine": "Кеноша-Расин", "lacrosse": "Ла-Кросс",
     "madison": "Мадисон", "milwaukee": "Милуоки", "sheboygan": "Шебойган",
-    "wausau": "Восау",
+    "wausau": "Восау", "northernwi": "Северный Висконсин",
 }
 
 
@@ -433,8 +434,9 @@ async def cmd_auto_posts(message: Message):
             f"Команды:\n"
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
-            f"<code>!объявления город newyork</code> — сменить город\n"
-            f"<code>!объявления интервал 120</code> — интервал в минутах",
+            f"<code>!объявления город wisconsin</code> — весь Висконсин\n"
+            f"<code>!объявления интервал 120</code> — интервал в минутах\n\n"
+            f"🚗 Постит реальные объявления о продаже машин с Craigslist",
             parse_mode="HTML",
         )
         return
