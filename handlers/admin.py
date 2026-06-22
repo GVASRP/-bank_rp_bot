@@ -406,6 +406,10 @@ CITY_NAMES = {
     "dallas": "Даллас", "miami": "Майами", "seattle": "Сиэтл",
     "sfbay": "Сан-Франциско", "boston": "Бостон", "denver": "Денвер",
     "lasvegas": "Лас-Вегас", "portland": "Портленд", "atlanta": "Атланта",
+    "appleton": "Апплтон (Fox Cities)", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
+    "janesville": "Джейнсвилл", "kenosha-racine": "Кеноша-Расин", "lacrosse": "Ла-Кросс",
+    "madison": "Мадисон", "milwaukee": "Милуоки", "sheboygan": "Шебойган",
+    "wausau": "Восау",
 }
 
 
