@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import random
-import re
 
 import aiohttp
 
@@ -11,7 +10,13 @@ logger = logging.getLogger(__name__)
 
 WIKI_URL = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles=%s&format=json&pithumbsize=600"
 
-CARS = [
+COLORS = [
+    "Белый", "Чёрный", "Серебристый", "Серый", "Синий", "Красный",
+    "Тёмно-синий", "Зелёный", "Бежевый", "Коричневый", "Бордовый",
+    "Золотистый", "Оранжевый", "Жёлтый", "Фиолетовый", "Хаки",
+]
+
+COMMON_CARS = [
     ("Honda", "Civic"), ("Honda", "Accord"), ("Honda", "CR-V"), ("Honda", "Pilot"),
     ("Toyota", "Camry"), ("Toyota", "Corolla"), ("Toyota", "RAV4"), ("Toyota", "Tacoma"),
     ("Ford", "F-150"), ("Ford", "Escape"), ("Ford", "Explorer"), ("Ford", "Mustang"),
@@ -28,6 +33,27 @@ CARS = [
     ("Mazda", "CX-5"), ("Mazda", "Mazda3"), ("Mazda", "CX-9"),
     ("Dodge", "Charger"), ("Dodge", "Durango"), ("Ram", "1500"),
     ("GMC", "Sierra"), ("GMC", "Yukon"), ("GMC", "Terrain"),
+]
+
+RARE_CARS = [
+    ("Porsche", "911 Carrera"), ("Porsche", "Cayenne"), ("Porsche", "Panamera"),
+    ("Lexus", "LC 500"), ("Lexus", "RX 350"), ("Lexus", "LX 600"),
+    ("Jaguar", "F-Type"), ("Jaguar", "XF"), ("Jaguar", "F-Pace"),
+    ("Maserati", "Ghibli"), ("Maserati", "Levante"),
+    ("Alfa Romeo", "Giulia"), ("Alfa Romeo", "Stelvio"),
+    ("Volvo", "XC90"), ("Volvo", "S90"), ("Volvo", "V90 Cross Country"),
+]
+
+LEGENDARY_CARS = [
+    ("Ferrari", "F8 Tributo"), ("Ferrari", "SF90 Stradale"), ("Ferrari", "Roma"),
+    ("Lamborghini", "Huracan"), ("Lamborghini", "Urus"), ("Lamborghini", "Aventador"),
+    ("Rolls-Royce", "Ghost"), ("Rolls-Royce", "Cullinan"),
+    ("Bentley", "Continental GT"), ("Bentley", "Bentayga"),
+    ("McLaren", "720S"), ("McLaren", "Artura"),
+    ("Aston Martin", "DB11"), ("Aston Martin", "DBS"),
+    ("Bugatti", "Chiron"),
+    ("Pagani", "Huayra"),
+    ("Koenigsegg", "Jesko"),
 ]
 
 YEARS = list(range(2014, 2026))
@@ -48,64 +74,97 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
 
+RARITY_WEIGHTS = {"common": 88, "rare": 9, "legendary": 3}
+RARITY_MULTIPLIERS = {"common": 1.0, "rare": 2.5, "legendary": 8.0}
+RARITY_NAMES = {"common": "", "rare": "⭐ Редкий", "legendary": "🔥🔥🔥 МЕГА-КАР 🔥🔥🔥"}
+RARITY_YEARS = {"common": (2014, 2025), "rare": (2018, 2025), "legendary": (2020, 2025)}
+
+
+def pick_rarity() -> str:
+    roll = random.randint(1, 100)
+    cumulative = 0
+    for rarity, weight in RARITY_WEIGHTS.items():
+        cumulative += weight
+        if roll <= cumulative:
+            return rarity
+    return "common"
+
 
 def generate_car() -> dict:
-    make, model = random.choice(CARS)
-    year = random.choice(YEARS)
+    rarity = pick_rarity()
+    if rarity == "legendary":
+        pool = LEGENDARY_CARS
+    elif rarity == "rare":
+        pool = RARE_CARS
+    else:
+        pool = COMMON_CARS
+
+    make, model = random.choice(pool)
+    yr_lo, yr_hi = RARITY_YEARS[rarity]
+    year = random.randint(yr_lo, yr_hi)
     miles = random.randint(10000, 160000)
     base_prices = {2014: 6000, 2015: 8000, 2016: 10000, 2017: 13000, 2018: 16000,
                    2019: 19000, 2020: 22000, 2021: 26000, 2022: 30000, 2023: 35000,
                    2024: 40000, 2025: 46000}
-    price = base_prices.get(year, 15000) + random.randint(-3000, 6000)
+    price = int((base_prices.get(year, 15000) + random.randint(-3000, 6000)) * RARITY_MULTIPLIERS[rarity])
     price = max(1000, price)
     city = random.choice(WI_CITIES_RU)
     condition = random.choice(CONDITIONS)
     features = random.sample(FEATURES, k=random.randint(3, 6))
     title = random.choice(TITLES)
     vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
+    color = random.choice(COLORS)
+    color_prefix = f"{color.lower()} " if rarity == "common" else ""
     desc = (
-        f"{make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
+        f"{color_prefix}{make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
         f"{' • '.join(features)}. {title.capitalize()}."
     )
     license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9999)}"
     return {
         "make": make, "model": model, "year": year, "miles": miles,
         "price": price, "city": city, "description": desc, "vin": vin,
-        "license_plate": license_plate,
-        "guid": f"gen_{vin}",
+        "license_plate": license_plate, "color": color, "rarity": rarity,
+        "guid": f"gen_{rarity}_{vin}",
     }
 
 
 async def fetch_car_image(make: str, model: str) -> bytes | None:
-    search = f"{make}_{model.replace(' ','_')}".replace("-","_")
-    url = WIKI_URL % search
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url, headers=HEADERS, timeout=8) as r:
-                if r.status != 200:
-                    return None
-                data = await r.json()
-        pages = data.get("query", {}).get("pages", {})
-        for pid, info in pages.items():
-            thumb = info.get("thumbnail", {}).get("source")
-            if thumb:
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(thumb, headers=HEADERS, timeout=10) as r:
-                        if r.status == 200:
-                            return await r.read()
-    except Exception:
-        pass
+    titles = [
+        f"{make}_{model}".replace(" ", "_").replace("-", "_"),
+        f"{make}_{model}".replace(" ", "_").replace("-", "_").replace("__", "_"),
+    ]
+    seen_urls = set()
+    for title in titles:
+        url = WIKI_URL % title
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, headers=HEADERS, timeout=8) as r:
+                    if r.status == 200:
+                        data = await r.json()
+            pages = data.get("query", {}).get("pages", {})
+            for pid, info in pages.items():
+                thumb = info.get("thumbnail", {}).get("source")
+                if thumb and thumb not in seen_urls:
+                    seen_urls.add(thumb)
+                    async with aiohttp.ClientSession() as s:
+                        async with s.get(thumb, headers=HEADERS, timeout=10) as r:
+                            if r.status == 200:
+                                return await r.read()
+        except Exception:
+            pass
     return None
 
 
 def format_caption(car: dict, vehicle_id: int) -> str:
+    rarity_prefix = RARITY_NAMES[car["rarity"]]
+    rarity_line = f"\n{rarity_prefix}" if rarity_prefix else ""
     return (
         f"🚗 <b>{car['year']} {car['make']} {car['model']}</b>\n"
         f"📍 {car['city']}, WI\n"
         f"💰 ${car['price']:,} | {car['miles']:,} миль\n"
-        f"🆔 ID: <b>#{vehicle_id}</b>\n"
-        f"📝 {car['description']}\n"
-        f"🔑 Номера: {car['license_plate']}"
+        f"🎨 {car['color']}\n"
+        f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}\n"
+        f"📝 {car['description']}"
     )
 
 
@@ -116,6 +175,7 @@ async def send_car(bot, chat_id: int, car: dict) -> bool:
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
+        car["color"], car["rarity"],
     )
     caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])
@@ -136,7 +196,7 @@ async def send_car(bot, chat_id: int, car: dict) -> bool:
 
 
 async def post_new_car(bot, chat_id: int) -> bool:
-    for _ in range(10):
+    for _ in range(30):
         car = generate_car()
         if not await is_listing_posted(car["guid"]):
             return await send_car(bot, chat_id, car)
@@ -148,6 +208,7 @@ async def force_post_one(bot, chat_id: int) -> str:
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
+        car["color"], car["rarity"],
     )
     caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])
@@ -159,7 +220,8 @@ async def force_post_one(bot, chat_id: int) -> str:
         else:
             await bot.send_message(chat_id, caption, parse_mode="HTML")
         await mark_listing_posted(car["guid"])
-        return f"✅ #{vehicle_id} {car['year']} {car['make']} {car['model']} — {car['city']}"
+        badge = RARITY_NAMES[car["rarity"]]
+        return f"✅ #{vehicle_id} {car['year']} {car['make']} {car['model']} — {car['city']} {badge}"
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
@@ -180,7 +242,7 @@ async def auto_poster_loop(bot):
                 continue
             interval_raw = await get_config(f"poster_interval:{chat_id}")
             interval = int(interval_raw or "120")
-            target_raw = await get_config(f"poster_channel:{chat_id}")
+            target_raw = await get_config(f"poster_cars_channel:{chat_id}")
             target = int(target_raw) if target_raw else chat_id
             now = asyncio.get_event_loop().time()
             last = last_post.get(chat_id, 0.0)

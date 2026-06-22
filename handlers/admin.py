@@ -22,6 +22,9 @@ from database import (
     set_config,
     create_house,
     get_house,
+    get_all_vehicles_by_owner,
+    admin_take_vehicle,
+    admin_give_vehicle,
 )
 from auto_poster import force_post_one
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
@@ -415,8 +418,8 @@ async def cmd_auto_posts(message: Message):
         enabled = await get_config(f"poster_enabled:{chat_id}")
         interval = await get_config(f"poster_interval:{chat_id}") or "120"
         status = "✅ Включены" if enabled == "1" else "❌ Выключены"
-        channel_raw = await get_config(f"poster_channel:{chat_id}")
-        channel_info = f"Канал: {channel_raw}" if channel_raw else "Канал: этот чат"
+        channel_raw = await get_config(f"poster_cars_channel:{chat_id}")
+        channel_info = f"🚗 Канал машин: {channel_raw}" if channel_raw else "🚗 Канал машин: этот чат"
         await message.reply(
             f"📢 <b>Авто-объявления</b>\n"
             f"Статус: {status}\n"
@@ -426,7 +429,7 @@ async def cmd_auto_posts(message: Message):
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
             f"<code>!объявления интервал 1</code> — интервал в минутах\n"
-            f"<code>!объявления канал ID</code> — куда постить (ID чата)\n"
+            f"<code>!объявления канал ID</code> — канал для авто (ID чата)\n"
             f"<code>!объявления тест</code> — показать 1 объявление\n\n"
             f"🚗 Реальные авто из Висконсина с фото (Wikipedia)",
             parse_mode="HTML",
@@ -439,8 +442,8 @@ async def cmd_auto_posts(message: Message):
         target_raw = args[2]
         try:
             target_id = int(target_raw.lstrip("@"))
-            await set_config(f"poster_channel:{chat_id}", str(target_id))
-            await message.reply(f"📢 Объявления будут поститься в чат {target_id}")
+            await set_config(f"poster_cars_channel:{chat_id}", str(target_id))
+            await message.reply(f"📢 Объявления машин будут поститься в чат {target_id}")
         except ValueError:
             await message.reply("❌ Укажите числовой ID чата (можно получить через @getmyid_bot)")
     elif action == "вкл":
@@ -521,3 +524,85 @@ async def cmd_delete_house(message: Message):
     from database import delete_house
     await delete_house(hid)
     await message.reply(f"✅ Дом #{hid} {h['type_name']} удалён")
+
+
+@router.message(Command("авто_пользователя", prefix="!/"))
+async def cmd_user_cars(message: Message):
+    if not await ensure_admin(message):
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!авто_пользователя @user</code>", parse_mode="HTML")
+        return
+    user = await get_user_by_telegram_id(0)  # place holder
+    uid = await resolve_target(args[1])
+    if not uid:
+        await message.reply("❌ Пользователь не найден")
+        return
+    vehicles = await get_all_vehicles_by_owner(uid)
+    if not vehicles:
+        await message.reply("📭 У пользователя нет автомобилей")
+        return
+    lines = [f"🚗 <b>Автомобили пользователя {args[1]}:</b>\n"]
+    for v in vehicles:
+        lines.append(
+            f"#{v['id']} — {v['year']} {v['make']} {v['model']} ({v['color']})\n"
+            f"   Статус: {v['status']} | Цена: ${v['price']:,}"
+        )
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("изъять_авто", prefix="!/"))
+async def cmd_take_car(message: Message):
+    if not await ensure_admin(message):
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!изъять_авто ID</code>", parse_mode="HTML")
+        return
+    try:
+        vid = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    v = await get_vehicle(vid)
+    if not v:
+        await message.reply(f"❌ Авто #{vid} не найдено")
+        return
+    if v["status"] != "sold":
+        await message.reply(f"❌ Авто #{vid} ещё не продано (статус: {v['status']})")
+        return
+    if not await admin_take_vehicle(vid):
+        await message.reply(f"❌ Ошибка изъятия")
+        return
+    await message.reply(f"✅ Авто #{vid} {v['year']} {v['make']} {v['model']} изъято и выставлено в продажу")
+
+
+@router.message(Command("выдать_авто", prefix="!/"))
+async def cmd_give_car(message: Message):
+    if not await ensure_admin(message):
+        return
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.reply("❌ Использование: <code>!выдать_авто @user ID</code>", parse_mode="HTML")
+        return
+    uid = await resolve_target(parts[1])
+    if not uid:
+        await message.reply("❌ Пользователь не найден")
+        return
+    try:
+        vid = int(parts[2])
+    except ValueError:
+        await message.reply("❌ ID авто должен быть числом")
+        return
+    v = await get_vehicle(vid)
+    if not v:
+        await message.reply(f"❌ Авто #{vid} не найдено")
+        return
+    if v["status"] != "available":
+        await message.reply(f"❌ Авто #{vid} недоступно (статус: {v['status']})")
+        return
+    if not await admin_give_vehicle(vid, uid):
+        await message.reply(f"❌ Ошибка выдачи")
+        return
+    await message.reply(f"✅ Авто #{vid} {v['year']} {v['make']} {v['model']} выдано пользователю {parts[1]}")
