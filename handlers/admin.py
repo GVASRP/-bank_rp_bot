@@ -421,7 +421,10 @@ async def cmd_auto_posts(message: Message):
         interval = await get_config(f"poster_interval:{chat_id}") or "120"
         status = "✅ Включены" if enabled == "1" else "❌ Выключены"
         channel_raw = await get_config(f"poster_cars_channel:{chat_id}")
-        channel_info = f"🚗 Канал машин: {channel_raw}" if channel_raw else "🚗 Канал машин: этот чат"
+        topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+        channel_info = f"🚗 Канал: {channel_raw}" if channel_raw else "🚗 Канал: этот чат"
+        if topic_raw:
+            channel_info += f" (топик {topic_raw})"
         await message.reply(
             f"📢 <b>Авто-объявления</b>\n"
             f"Статус: {status}\n"
@@ -432,6 +435,7 @@ async def cmd_auto_posts(message: Message):
             f"<code>!объявления выкл</code> — выключить\n"
             f"<code>!объявления интервал 1</code> — интервал в минутах\n"
             f"<code>!объявления канал @channel</code> — канал для авто\n"
+            f"<code>!объявления топик</code> — сохранить текущий топик (для тем)\n"
             f"<code>!объявления тест</code> — показать 1 объявление\n\n"
             f"🚗 Реальные авто из Висконсина с фото (Wikipedia)",
             parse_mode="HTML",
@@ -445,6 +449,7 @@ async def cmd_auto_posts(message: Message):
             target_raw = args[2].lower()
             if target_raw in ("этот_чат", "this_chat", "здесь"):
                 await set_config(f"poster_cars_channel:{chat_id}", "")
+                await set_config(f"poster_cars_topic:{chat_id}", "")
                 await message.reply("📢 Объявления будут поститься в этот чат")
                 return
             try:
@@ -463,20 +468,34 @@ async def cmd_auto_posts(message: Message):
                     return
             if target_id == message.chat.id:
                 await set_config(f"poster_cars_channel:{chat_id}", "")
+                await set_config(f"poster_cars_topic:{chat_id}", "")
                 await message.reply("📢 Объявления будут поститься в этот чат")
             else:
                 await set_config(f"poster_cars_channel:{chat_id}", str(target_id))
+                await set_config(f"poster_cars_topic:{chat_id}", "")
                 await message.reply(f"📢 Объявления машин будут поститься в чат {target_id}")
         else:
             current = await get_config(f"poster_cars_channel:{chat_id}")
-            if current:
-                await message.reply(f"📢 Текущий канал машин: <code>{current}</code>\n"
-                                    f"Чтобы сбросить (постить сюда): <code>!объявления канал этот_чат</code>",
+            current_topic = await get_config(f"poster_cars_topic:{chat_id}")
+            if current or current_topic:
+                info = f"Чат: <code>{current}</code>" if current else ""
+                if current_topic:
+                    info += f", Топик ID: <code>{current_topic}</code>"
+                await message.reply(f"📢 Текущий канал машин: {info}\n"
+                                    f"Чтобы сбросить: <code>!объявления канал этот_чат</code>",
                                     parse_mode="HTML")
             else:
                 await message.reply("📢 Сейчас объявления постятся в этот чат.\n"
                                     "Чтобы задать канал: <code>!объявления канал @channel</code>",
                                     parse_mode="HTML")
+    elif action == "топик":
+        mid = message.message_thread_id
+        if not mid:
+            await message.reply("❌ Эта команда работает только внутри топика (темы).\n"
+                                "Зайди в нужный топик и отправь команду там.")
+            return
+        await set_config(f"poster_cars_topic:{chat_id}", str(mid))
+        await message.reply(f"✅ Сохранён топик ID {mid}. Объявления будут поститься сюда.")
     elif action == "вкл":
         await set_config(f"poster_enabled:{chat_id}", "1")
         chats = await get_config("poster_chats") or ""
@@ -497,7 +516,9 @@ async def cmd_auto_posts(message: Message):
         except ValueError:
             await message.reply("❌ Укажите число минут")
     elif action == "тест":
-        result = await force_post_one(message.bot, chat_id)
+        topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+        topic = int(topic_raw) if topic_raw else None
+        result = await force_post_one(message.bot, chat_id, topic)
         await message.reply(result, parse_mode="HTML")
     else:
         await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, интервал, тест")

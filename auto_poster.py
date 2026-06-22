@@ -189,7 +189,7 @@ def format_caption(car: dict, vehicle_id: int) -> str:
     )
 
 
-async def send_car(bot, chat_id: int, car: dict) -> bool:
+async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None = None) -> bool:
     if await is_listing_posted(car["guid"]):
         return False
 
@@ -202,12 +202,15 @@ async def send_car(bot, chat_id: int, car: dict) -> bool:
     image = await fetch_car_image(car["make"], car["model"])
 
     try:
+        send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
         if image:
             from aiogram.types import BufferedInputFile
-            photo = BufferedInputFile(image, filename="car.jpg")
-            await bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML")
+            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+            await bot.send_photo(**send_args, caption=caption)
         else:
-            await bot.send_message(chat_id, caption, parse_mode="HTML")
+            await bot.send_message(**send_args, text=caption)
 
         await mark_listing_posted(car["guid"])
         return True
@@ -216,15 +219,15 @@ async def send_car(bot, chat_id: int, car: dict) -> bool:
         return False
 
 
-async def post_new_car(bot, chat_id: int) -> bool:
+async def post_new_car(bot, chat_id: int, message_thread_id: int | None = None) -> bool:
     for _ in range(50):
         car = generate_car()
         if not await is_listing_posted(car["guid"]):
-            return await send_car(bot, chat_id, car)
+            return await send_car(bot, chat_id, car, message_thread_id)
     return False
 
 
-async def force_post_one(bot, chat_id: int) -> str:
+async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None) -> str:
     car = generate_car()
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
@@ -234,12 +237,15 @@ async def force_post_one(bot, chat_id: int) -> str:
     caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])
     try:
+        send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
         if image:
             from aiogram.types import BufferedInputFile
-            photo = BufferedInputFile(image, filename="car.jpg")
-            await bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML")
+            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+            await bot.send_photo(**send_args, caption=caption)
         else:
-            await bot.send_message(chat_id, caption, parse_mode="HTML")
+            await bot.send_message(**send_args, text=caption)
         await mark_listing_posted(car["guid"])
         badge = RARITY_NAMES[car["rarity"]]
         return f"✅ #{vehicle_id} {car['year']} {car['make']} {car['model']} — {car['city']} {badge}"
@@ -265,6 +271,8 @@ async def auto_poster_loop(bot):
             interval_min = int(interval_raw) if interval_raw and interval_raw.isdigit() else 120
             target_raw = await get_config(f"poster_cars_channel:{chat_id}")
             target = int(target_raw) if target_raw else chat_id
+            topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+            topic = int(topic_raw) if topic_raw else None
 
             last_key = f"poster_last_post:{chat_id}"
             last_raw = await get_config(last_key)
@@ -273,7 +281,7 @@ async def auto_poster_loop(bot):
 
             if now - last_ts >= interval_min * 60:
                 logger.info("Posting car for chat %s (interval=%s min, last=%s)", chat_id, interval_min, last_ts)
-                await post_new_car(bot, target)
+                await post_new_car(bot, target, topic)
                 await set_config(last_key, str(now))
 
         await asyncio.sleep(TICK)
