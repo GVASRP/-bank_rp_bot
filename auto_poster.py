@@ -98,25 +98,31 @@ async def post_new_listings(bot, chat_id: int, city: str, city_name: str, max_co
 async def auto_poster_loop(bot):
     logger.info("Auto-poster started")
     wi_index = 0
+    last_post = 0.0
+    TICK = 15
+
     while True:
         enabled = await get_config("poster_enabled")
         chat_id_raw = await get_config("poster_chat_id")
-        interval_raw = await get_config("poster_interval")
 
         if enabled == "1" and chat_id_raw:
-            chat_id = int(chat_id_raw)
+            interval_raw = await get_config("poster_interval")
             interval = int(interval_raw or "120")
-            city = await get_config("poster_city") or "newyork"
+            now = asyncio.get_event_loop().time()
 
-            if city == "wisconsin":
-                actual_city = WISCONSIN_CITIES[wi_index % len(WISCONSIN_CITIES)]
-                wi_index += 1
-                city_name = CITY_NAMES.get(actual_city, actual_city)
-                await post_new_listings(bot, chat_id, actual_city, city_name, 1)
-            else:
-                city_name = CITY_NAMES.get(city, city)
-                await post_new_listings(bot, chat_id, city, city_name, 1)
+            if now - last_post >= interval * 60:
+                chat_id = int(chat_id_raw)
+                city = await get_config("poster_city") or "newyork"
 
-            await asyncio.sleep(interval * 60)
-        else:
-            await asyncio.sleep(60)
+                if city == "wisconsin":
+                    actual_city = WISCONSIN_CITIES[wi_index % len(WISCONSIN_CITIES)]
+                    wi_index += 1
+                    city_name = CITY_NAMES.get(actual_city, actual_city)
+                    await post_new_listings(bot, chat_id, actual_city, city_name, 1)
+                else:
+                    city_name = CITY_NAMES.get(city, city)
+                    await post_new_listings(bot, chat_id, city, city_name, 1)
+
+                last_post = now
+
+        await asyncio.sleep(TICK)
