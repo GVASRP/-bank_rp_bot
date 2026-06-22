@@ -534,7 +534,6 @@ async def cmd_user_cars(message: Message):
     if len(args) < 2:
         await message.reply("❌ Использование: <code>!авто_пользователя @user</code>", parse_mode="HTML")
         return
-    user = await get_user_by_telegram_id(0)  # place holder
     uid = await resolve_target(args[1])
     if not uid:
         await message.reply("❌ Пользователь не найден")
