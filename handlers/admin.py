@@ -20,6 +20,8 @@ from database import (
     create_deposit_account,
     get_config,
     set_config,
+    create_house,
+    get_house,
 )
 from auto_poster import force_post_one
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
@@ -453,3 +455,57 @@ async def cmd_auto_posts(message: Message):
         await message.reply(result, parse_mode="HTML")
     else:
         await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, интервал, тест")
+
+
+@router.message(Command("добавить_дом", prefix="!/"))
+async def cmd_add_house(message: Message):
+    if not await ensure_admin(message):
+        return
+    parts = message.text.split(maxsplit=6)
+    if len(parts) < 6:
+        await message.reply(
+            "❌ Использование: <code>!добавить_дом тип_жилья локация цена комнаты ванны площадь [описание]</code>\n"
+            "Пример: <code>!добавить_дом house \"Мэдисон,WI\" 350000 3 2 1800 \"Большой задний двор\"</code>",
+            parse_mode="HTML",
+        )
+        return
+    type_name = parts[1]
+    location = parts[2]
+    try:
+        price = int(parts[3])
+        bedrooms = int(parts[4])
+        bathrooms = int(parts[5])
+        sqft = int(parts[6])
+    except ValueError:
+        await message.reply("❌ Цена, комнаты, ванны, площадь — должны быть числами")
+        return
+    description = parts[7] if len(parts) > 7 else None
+    hid = await create_house(type_name, location, price, bedrooms, bathrooms, sqft, description)
+    await message.reply(
+        f"✅ Дом добавлен!\n"
+        f"🏠 #{hid} {type_name} — {location}\n"
+        f"💰 ${price:,} | 🛏 {bedrooms} | 🛁 {bathrooms} | 📐 {sqft} кв.футов",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("удалить_дом", prefix="!/"))
+async def cmd_delete_house(message: Message):
+    if not await ensure_admin(message):
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!удалить_дом ID</code>", parse_mode="HTML")
+        return
+    try:
+        hid = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    h = await get_house(hid)
+    if not h:
+        await message.reply(f"❌ Дом #{hid} не найден")
+        return
+    from database import delete_house
+    await delete_house(hid)
+    await message.reply(f"✅ Дом #{hid} {h['type_name']} удалён")

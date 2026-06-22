@@ -102,6 +102,38 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+        )
+""")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS vehicles (
+                id SERIAL PRIMARY KEY,
+                make TEXT NOT NULL,
+                model TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                price INTEGER NOT NULL,
+                miles INTEGER NOT NULL,
+                city TEXT NOT NULL,
+                vin TEXT NOT NULL,
+                license_plate TEXT NOT NULL,
+                owner_telegram_id BIGINT,
+                status TEXT DEFAULT 'available',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS houses (
+                id SERIAL PRIMARY KEY,
+                type_name TEXT NOT NULL,
+                location TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                bedrooms INTEGER NOT NULL,
+                bathrooms REAL NOT NULL,
+                sqft INTEGER NOT NULL,
+                description TEXT,
+                photo_url TEXT,
+                owner_telegram_id BIGINT,
+                status TEXT DEFAULT 'available',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
         """)
         await conn.execute("""
@@ -166,6 +198,34 @@ async def init_db():
                 CREATE TABLE IF NOT EXISTS config (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS vehicles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    make TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    year INTEGER NOT NULL,
+                    price INTEGER NOT NULL,
+                    miles INTEGER NOT NULL,
+                    city TEXT NOT NULL,
+                    vin TEXT NOT NULL,
+                    license_plate TEXT NOT NULL,
+                    owner_telegram_id INTEGER,
+                    status TEXT DEFAULT 'available',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS houses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type_name TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    price INTEGER NOT NULL,
+                    bedrooms INTEGER NOT NULL,
+                    bathrooms REAL NOT NULL,
+                    sqft INTEGER NOT NULL,
+                    description TEXT,
+                    photo_url TEXT,
+                    owner_telegram_id INTEGER,
+                    status TEXT DEFAULT 'available',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE TABLE IF NOT EXISTS deposits (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -749,6 +809,259 @@ async def set_config(key: str, value: str) -> None:
                 (key, value),
             )
             await conn.commit()
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def create_vehicle(make: str, model: str, year: int, price: int, miles: int,
+                         city: str, vin: str, license_plate: str) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+                make, model, year, price, miles, city, vin, license_plate,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (make, model, year, price, miles, city, vin, license_plate),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_vehicle(vehicle_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1", vehicle_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_available_vehicles() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
+        else:
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_user_vehicles(telegram_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 ORDER BY created_at DESC", telegram_id)
+        else:
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? ORDER BY created_at DESC", (telegram_id,))
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def buy_vehicle(vehicle_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND status = 'available' FOR UPDATE", vehicle_id)
+            if not row:
+                return False
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2", telegram_id, vehicle_id)
+            return True
+        else:
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND status = 'available'", (vehicle_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?", (telegram_id, vehicle_id))
+            await conn.commit()
+            return True
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def sell_vehicle(vehicle_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' FOR UPDATE",
+                vehicle_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE id = $1", vehicle_id)
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'", (vehicle_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE id = ?", (vehicle_id,))
+            await conn.commit()
+            return True
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def create_house(type_name: str, location: str, price: int, bedrooms: int,
+                       bathrooms: float, sqft: int, description: str = "", photo_url: str = "") -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO houses (type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+                type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO houses (type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_house(house_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM houses WHERE id = $1", house_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM houses WHERE id = ?", (house_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_available_houses() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM houses WHERE status = 'available' ORDER BY created_at DESC")
+        else:
+            cursor = await conn.execute("SELECT * FROM houses WHERE status = 'available' ORDER BY created_at DESC")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_user_houses(telegram_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM houses WHERE owner_telegram_id = $1 ORDER BY created_at DESC", telegram_id)
+        else:
+            cursor = await conn.execute("SELECT * FROM houses WHERE owner_telegram_id = ? ORDER BY created_at DESC", (telegram_id,))
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def buy_house(house_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM houses WHERE id = $1 AND status = 'available' FOR UPDATE", house_id)
+            if not row:
+                return False
+            await conn.execute("UPDATE houses SET owner_telegram_id = $1, status = 'sold' WHERE id = $2", telegram_id, house_id)
+            return True
+        else:
+            cursor = await conn.execute("SELECT * FROM houses WHERE id = ? AND status = 'available'", (house_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute("UPDATE houses SET owner_telegram_id = ?, status = 'sold' WHERE id = ?", (telegram_id, house_id))
+            await conn.commit()
+            return True
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def sell_house(house_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' FOR UPDATE",
+                house_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute("UPDATE houses SET owner_telegram_id = NULL, status = 'available' WHERE id = $1", house_id)
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'", (house_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute("UPDATE houses SET owner_telegram_id = NULL, status = 'available' WHERE id = ?", (house_id,))
+            await conn.commit()
+            return True
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def delete_house(house_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM houses WHERE id = $1 FOR UPDATE", house_id)
+            if not row:
+                return False
+            await conn.execute("DELETE FROM houses WHERE id = $1", house_id)
+            return True
+        else:
+            cursor = await conn.execute("SELECT * FROM houses WHERE id = ?", (house_id,))
+            if not cursor.fetchone():
+                return False
+            await conn.execute("DELETE FROM houses WHERE id = ?", (house_id,))
+            await conn.commit()
+            return True
     finally:
         if not _is_pg:
             await conn.close()

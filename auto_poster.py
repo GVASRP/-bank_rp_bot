@@ -5,7 +5,7 @@ import re
 
 import aiohttp
 
-from database import is_listing_posted, mark_listing_posted, get_config, set_config
+from database import is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,11 @@ def generate_car() -> dict:
         f"{make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
         f"{' • '.join(features)}. {title.capitalize()}."
     )
+    license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9999)}"
     return {
         "make": make, "model": model, "year": year, "miles": miles,
         "price": price, "city": city, "description": desc, "vin": vin,
+        "license_plate": license_plate,
         "guid": f"gen_{vin}",
     }
 
@@ -96,13 +98,14 @@ async def fetch_car_image(make: str, model: str) -> bytes | None:
     return None
 
 
-def format_caption(car: dict) -> str:
+def format_caption(car: dict, vehicle_id: int) -> str:
     return (
         f"🚗 <b>{car['year']} {car['make']} {car['model']}</b>\n"
         f"📍 {car['city']}, WI\n"
         f"💰 ${car['price']:,} | {car['miles']:,} миль\n"
+        f"🆔 ID: <b>#{vehicle_id}</b>\n"
         f"📝 {car['description']}\n"
-        f"🆔 VIN: {car['vin']}"
+        f"🔑 Номера: {car['license_plate']}"
     )
 
 
@@ -110,7 +113,11 @@ async def send_car(bot, chat_id: int, car: dict) -> bool:
     if await is_listing_posted(car["guid"]):
         return False
 
-    caption = format_caption(car)
+    vehicle_id = await create_vehicle(
+        car["make"], car["model"], car["year"], car["price"],
+        car["miles"], car["city"], car["vin"], car["license_plate"],
+    )
+    caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])
 
     try:
@@ -138,7 +145,11 @@ async def post_new_car(bot, chat_id: int) -> bool:
 
 async def force_post_one(bot, chat_id: int) -> str:
     car = generate_car()
-    caption = format_caption(car)
+    vehicle_id = await create_vehicle(
+        car["make"], car["model"], car["year"], car["price"],
+        car["miles"], car["city"], car["vin"], car["license_plate"],
+    )
+    caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])
     try:
         if image:
@@ -148,7 +159,7 @@ async def force_post_one(bot, chat_id: int) -> str:
         else:
             await bot.send_message(chat_id, caption, parse_mode="HTML")
         await mark_listing_posted(car["guid"])
-        return f"✅ {car['year']} {car['make']} {car['model']} — {car['city']}"
+        return f"✅ #{vehicle_id} {car['year']} {car['make']} {car['model']} — {car['city']}"
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
