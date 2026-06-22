@@ -45,22 +45,22 @@ async def main():
     dp.include_router(router)
 
     await bot.set_my_commands([
-        BotCommand(command="start", description="Помощь и список команд"),
-        BotCommand(command="баланс", description="Проверить баланс"),
-        BotCommand(command="перевести", description="Перевести деньги пользователю"),
-        BotCommand(command="история", description="История операций"),
-        BotCommand(command="запросить_кредит", description="Запросить кредит"),
-        BotCommand(command="запросить_вклад", description="Запросить вклад"),
-        BotCommand(command="начислить", description="[Админ] Начислить деньги"),
-        BotCommand(command="списать", description="[Админ] Списать деньги"),
-        BotCommand(command="установить_баланс", description="[Админ] Установить баланс"),
-        BotCommand(command="одобрить_кредит", description="[Админ] Одобрить кредит"),
-        BotCommand(command="отклонить_кредит", description="[Админ] Отклонить кредит"),
-        BotCommand(command="одобрить_вклад", description="[Админ] Одобрить вклад"),
-        BotCommand(command="отклонить_вклад", description="[Админ] Отклонить вклад"),
-        BotCommand(command="заявки", description="[Админ] Список заявок"),
+        BotCommand(command="start", description="Помощь / список команд"),
+        BotCommand(command="balance", description="💰 Проверить баланс"),
+        BotCommand(command="transfer", description="💸 Перевести деньги"),
+        BotCommand(command="history", description="📜 История операций"),
+        BotCommand(command="loan", description="🏦 Запросить кредит"),
+        BotCommand(command="deposit", description="🏛 Запросить вклад"),
+        BotCommand(command="add", description="[Админ] Начислить деньги"),
+        BotCommand(command="remove", description="[Админ] Списать деньги"),
+        BotCommand(command="setbalance", description="[Админ] Установить баланс"),
+        BotCommand(command="approveloan", description="[Админ] Одобрить кредит"),
+        BotCommand(command="rejectloan", description="[Админ] Отклонить кредит"),
+        BotCommand(command="approvedep", description="[Админ] Одобрить вклад"),
+        BotCommand(command="rejectdep", description="[Админ] Отклонить вклад"),
+        BotCommand(command="requests", description="[Админ] Список заявок"),
     ])
-    logger.info("Команды зарегистрированы")
+    logger.info("Команды зарегистрированы. Русские команды также работают")
 
     await run_web_server()
 
