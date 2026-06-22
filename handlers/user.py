@@ -17,7 +17,7 @@ from database import (
     get_deposit_by_id,
     withdraw_deposit,
 )
-from utils import calc_deposit_payout, format_amount, parse_amount, resolve_target
+from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, resolve_target
 
 router = Router()
 
@@ -196,11 +196,12 @@ async def cmd_my_credits(message: Message):
 
     lines = ["💳 <b>Ваши кредиты:</b>\n"]
     for c in credits:
-        paid = c["amount"] - c["remaining"]
+        info = calc_credit_debt(c)
         lines.append(
-            f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов\n"
-            f"   Погашено: {format_amount(paid)} | Остаток: {format_amount(c['remaining'])}\n"
-            f"   Статус: <b>активен</b>"
+            f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов | {c['interest_rate']}%/год\n"
+            f"   Остаток тела: {format_amount(info['remaining_principal'])}\n"
+            f"   Начислено процентов: +{format_amount(info['total_interest'])} | Оплачено: {format_amount(info['interest_paid'])}\n"
+            f"   Долг на сейчас: <b>{format_amount(info['total_debt'])}</b>"
         )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
@@ -241,9 +242,11 @@ async def cmd_repay_credit(message: Message):
         message.from_user.first_name,
     )
 
-    overpay = amount > credit["remaining"]
-    if overpay:
-        amount = credit["remaining"]
+    debt_info = calc_credit_debt(credit)
+    max_payment = min(user["balance"], debt_info["total_debt"])
+
+    if amount > max_payment:
+        amount = max_payment
 
     if user["balance"] < amount:
         await message.reply(
@@ -252,6 +255,7 @@ async def cmd_repay_credit(message: Message):
         )
         return
 
+    interest_before = debt_info["interest_due"]
     await update_balance(message.from_user.id, -amount)
     await repay_credit(credit_id, amount)
     await add_transaction("repay", message.from_user.id, None, amount, f"Погашение кредита #{credit_id}")
@@ -264,9 +268,13 @@ async def cmd_repay_credit(message: Message):
             parse_mode="HTML",
         )
     else:
+        info = calc_credit_debt(credit)
+        interest_paid_now = min(amount, interest_before)
         await message.reply(
             f"✅ Погашено <b>{format_amount(amount)}</b> долларов по кредиту #{credit_id}\n"
-            f"Остаток: <b>{format_amount(credit['remaining'])}</b> долларов",
+            f"Из них проценты: {format_amount(interest_paid_now)} | Тело: {format_amount(amount - interest_paid_now)}\n"
+            f"Остаток тела: <b>{format_amount(info['remaining_principal'])}</b>\n"
+            f"Долг на сейчас: <b>{format_amount(info['total_debt'])}</b>",
             parse_mode="HTML",
         )
 

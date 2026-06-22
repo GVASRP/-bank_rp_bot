@@ -75,12 +75,19 @@ async def init_db():
                 id SERIAL PRIMARY KEY,
                 user_telegram_id BIGINT NOT NULL,
                 amount INTEGER NOT NULL,
-                remaining INTEGER NOT NULL,
+                remaining_principal INTEGER NOT NULL,
                 interest_rate INTEGER DEFAULT 10,
+                interest_paid INTEGER DEFAULT 0,
+                duration_days INTEGER DEFAULT 30,
                 status TEXT DEFAULT 'active',
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
         """)
+        for col, default in (("remaining_principal", 0), ("interest_paid", 0), ("duration_days", 30)):
+            try:
+                await conn.execute(f"ALTER TABLE credits ADD COLUMN {col} INTEGER DEFAULT {default}")
+            except Exception:
+                pass
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS deposits (
                 id SERIAL PRIMARY KEY,
@@ -129,8 +136,10 @@ async def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_telegram_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
-                    remaining INTEGER NOT NULL,
+                    remaining_principal INTEGER NOT NULL,
                     interest_rate INTEGER DEFAULT 10,
+                    interest_paid INTEGER DEFAULT 0,
+                    duration_days INTEGER DEFAULT 30,
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
@@ -434,19 +443,19 @@ async def update_deposit_request(request_id: int, status: str) -> None:
             await conn.close()
 
 
-async def create_credit(user_telegram_id: int, amount: int, remaining: int) -> int:
+async def create_credit(user_telegram_id: int, amount: int, interest_rate: int = 10, duration_days: int = 30) -> int:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO credits (user_telegram_id, amount, remaining) VALUES ($1, $2, $3) RETURNING id",
-                user_telegram_id, amount, remaining,
+                "INSERT INTO credits (user_telegram_id, amount, remaining_principal, interest_rate, duration_days) VALUES ($1, $2, $2, $3, $4) RETURNING id",
+                user_telegram_id, amount, interest_rate, duration_days,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO credits (user_telegram_id, amount, remaining) VALUES (?, ?, ?)",
-                (user_telegram_id, amount, remaining),
+                "INSERT INTO credits (user_telegram_id, amount, remaining_principal, interest_rate, duration_days) VALUES (?, ?, ?, ?, ?)",
+                (user_telegram_id, amount, amount, interest_rate, duration_days),
             )
             await conn.commit()
             return cursor.lastrowid
@@ -497,22 +506,48 @@ async def repay_credit(credit_id: int, amount: int) -> bool:
             row = await conn.fetchrow("SELECT * FROM credits WHERE id = $1 FOR UPDATE", credit_id)
             if not row or row["status"] != "active":
                 return False
-            new_remaining = row["remaining"] - amount
+            credit = dict(row)
+            from utils import calc_credit_debt
+            debt_info = calc_credit_debt(credit)
+            interest_due = debt_info["interest_due"]
+            pay_interest = min(amount, interest_due)
+            pay_principal = amount - pay_interest
+            new_interest_paid = credit["interest_paid"] + pay_interest
+            new_remaining = credit["remaining_principal"] - pay_principal
             if new_remaining <= 0:
-                await conn.execute("UPDATE credits SET remaining = 0, status = 'paid' WHERE id = $1", credit_id)
+                await conn.execute(
+                    "UPDATE credits SET remaining_principal = 0, interest_paid = $1, status = 'paid' WHERE id = $2",
+                    new_interest_paid, credit_id,
+                )
             else:
-                await conn.execute("UPDATE credits SET remaining = $1 WHERE id = $2", new_remaining, credit_id)
+                await conn.execute(
+                    "UPDATE credits SET remaining_principal = $1, interest_paid = $2 WHERE id = $3",
+                    new_remaining, new_interest_paid, credit_id,
+                )
             return True
         else:
             cursor = await conn.execute("SELECT * FROM credits WHERE id = ?", (credit_id,))
             row = await cursor.fetchone()
             if not row or row["status"] != "active":
                 return False
-            new_remaining = row["remaining"] - amount
+            credit = dict(row)
+            from utils import calc_credit_debt
+            debt_info = calc_credit_debt(credit)
+            interest_due = debt_info["interest_due"]
+            pay_interest = min(amount, interest_due)
+            pay_principal = amount - pay_interest
+            new_interest_paid = credit["interest_paid"] + pay_interest
+            new_remaining = credit["remaining_principal"] - pay_principal
             if new_remaining <= 0:
-                await conn.execute("UPDATE credits SET remaining = 0, status = 'paid' WHERE id = ?", (credit_id,))
+                await conn.execute(
+                    "UPDATE credits SET remaining_principal = 0, interest_paid = ?, status = 'paid' WHERE id = ?",
+                    (new_interest_paid, credit_id),
+                )
             else:
-                await conn.execute("UPDATE credits SET remaining = ? WHERE id = ?", (new_remaining, credit_id))
+                await conn.execute(
+                    "UPDATE credits SET remaining_principal = ?, interest_paid = ? WHERE id = ?",
+                    (new_remaining, new_interest_paid, credit_id),
+                )
             await conn.commit()
             return True
     finally:

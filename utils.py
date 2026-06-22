@@ -82,3 +82,28 @@ def calc_deposit_payout(deposit: dict) -> tuple:
         interest = 0
     payout = deposit["amount"] + interest
     return payout, interest
+
+
+def calc_credit_debt(credit: dict) -> dict:
+    try:
+        created = datetime.strptime(credit["created_at"], "%Y-%m-%d %H:%M:%S")
+        delta = datetime.now() - created
+        days_held = delta.total_seconds() / 86400
+        if days_held < 1:
+            days_held = 1
+        total_interest = int(credit["amount"] * credit["interest_rate"] * days_held / 36500)
+    except (ValueError, KeyError):
+        total_interest = 0
+    interest_paid = credit.get("interest_paid", 0)
+    interest_due = total_interest - interest_paid
+    if interest_due < 0:
+        interest_due = 0
+    remaining_principal = credit.get("remaining_principal", credit.get("remaining", credit["amount"]))
+    total_debt = remaining_principal + interest_due
+    return {
+        "remaining_principal": remaining_principal,
+        "interest_paid": interest_paid,
+        "interest_due": interest_due,
+        "total_interest": total_interest,
+        "total_debt": total_debt,
+    }

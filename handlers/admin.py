@@ -19,7 +19,7 @@ from database import (
     get_all_deposits,
     create_deposit_account,
 )
-from utils import calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
+from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
 
 router = Router()
 
@@ -138,9 +138,11 @@ async def cmd_approve_credit(message: Message):
     if not await ensure_admin(message):
         return
 
-    args = message.text.split(maxsplit=2)
+    args = message.text.split(maxsplit=3)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!одобрить_кредит id [процент]</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!одобрить_кредит id [процент] [срок_дней]</code>\n"
+            "Пример: <code>!одобрить_кредит 1 20 30</code> — 20% годовых на 30 дней",
+            parse_mode="HTML")
         return
 
     try:
@@ -159,6 +161,16 @@ async def cmd_approve_credit(message: Message):
             await message.reply("❌ Процент должен быть числом (например: 10)")
             return
 
+    duration_days = 30
+    if len(args) >= 4:
+        try:
+            duration_days = int(args[3])
+            if duration_days < 1:
+                duration_days = 30
+        except ValueError:
+            await message.reply("❌ Срок должен быть числом (дни)")
+            return
+
     request = await get_credit_request(request_id)
     if not request:
         await message.reply(f"❌ Заявка #{request_id} не найдена")
@@ -167,15 +179,15 @@ async def cmd_approve_credit(message: Message):
         await message.reply(f"❌ Заявка #{request_id} уже обработана (статус: {request['status']})")
         return
 
-    remaining = request["amount"] + (request["amount"] * interest // 100)
     await update_credit_request(request_id, "approved")
-    await create_credit(request["user_telegram_id"], request["amount"], remaining)
+    credit_id = await create_credit(request["user_telegram_id"], request["amount"], interest, duration_days)
     await update_balance(request["user_telegram_id"], request["amount"])
-    await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%)")
+    await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%, {duration_days}д)")
 
     await message.reply(
         f"✅ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
-        f"Процент: <b>{interest}%</b> | К погашению: <b>{format_amount(remaining)}</b>\n"
+        f"Ставка: <b>{interest}%</b> годовых | Срок: <b>{duration_days}</b> дней\n"
+        f"Проценты начисляются ежедневно на остаток тела кредита.\n"
         f"Средства зачислены пользователю.",
         parse_mode="HTML",
     )
@@ -347,11 +359,12 @@ async def cmd_all_credits(message: Message):
     for c in credits:
         user = await get_user_by_telegram_id(c["user_telegram_id"])
         name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
-        paid = c["amount"] - c["remaining"]
+        info = calc_credit_debt(c)
         lines.append(
             f"#{c['id']} — {name}\n"
-            f"   Выдано: {format_amount(c['amount'])} | Погашено: {format_amount(paid)}\n"
-            f"   Остаток: <b>{format_amount(c['remaining'])}</b> долларов"
+            f"   Выдано: {format_amount(c['amount'])} | {c['interest_rate']}%/год | {c['duration_days']}д\n"
+            f"   Тело: {format_amount(info['remaining_principal'])} | %: +{format_amount(info['interest_due'])}\n"
+            f"   Долг: <b>{format_amount(info['total_debt'])}</b>"
         )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
