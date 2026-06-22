@@ -25,6 +25,8 @@ from database import (
     get_all_vehicles_by_owner,
     admin_take_vehicle,
     admin_give_vehicle,
+    clear_posted_listings,
+    clear_available_vehicles,
 )
 from auto_poster import force_post_one
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
@@ -605,3 +607,17 @@ async def cmd_give_car(message: Message):
         await message.reply(f"❌ Ошибка выдачи")
         return
     await message.reply(f"✅ Авто #{vid} {v['year']} {v['make']} {v['model']} выдано пользователю {parts[1]}")
+
+
+@router.message(Command("очистить_объявления", prefix="!/"))
+async def cmd_clear_listings(message: Message):
+    if not await ensure_admin(message):
+        return
+    posted = await clear_posted_listings()
+    avail = await clear_available_vehicles()
+    await message.reply(
+        f"🗑 Очищено:\n"
+        f"• {posted} записей в архиве объявлений\n"
+        f"• {avail} непроданных автомобилей\n\n"
+        f"Авто-постер начнёт генерировать новые объявления.", parse_mode="HTML",
+    )

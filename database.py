@@ -789,6 +789,36 @@ async def mark_listing_posted(guid: str) -> None:
             await conn.close()
 
 
+async def clear_posted_listings() -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("DELETE FROM posted_listings")
+            return int(result.split()[-1]) if result else 0
+        else:
+            cursor = await conn.execute("DELETE FROM posted_listings")
+            await conn.commit()
+            return cursor.rowcount
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def clear_available_vehicles() -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("DELETE FROM vehicles WHERE status = 'available'")
+            return int(result.split()[-1]) if result else 0
+        else:
+            cursor = await conn.execute("DELETE FROM vehicles WHERE status = 'available'")
+            await conn.commit()
+            return cursor.rowcount
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
 async def get_config(key: str) -> str | None:
     conn = await get_conn()
     try:
