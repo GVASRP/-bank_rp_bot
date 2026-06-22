@@ -431,7 +431,7 @@ async def cmd_auto_posts(message: Message):
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
             f"<code>!объявления интервал 1</code> — интервал в минутах\n"
-            f"<code>!объявления канал ID</code> — канал для авто (ID чата)\n"
+            f"<code>!объявления канал @channel</code> — канал для авто\n"
             f"<code>!объявления тест</code> — показать 1 объявление\n\n"
             f"🚗 Реальные авто из Висконсина с фото (Wikipedia)",
             parse_mode="HTML",
@@ -440,14 +440,43 @@ async def cmd_auto_posts(message: Message):
 
     action = args[1]
 
-    if action == "канал" and len(args) >= 3:
-        target_raw = args[2]
-        try:
-            target_id = int(target_raw.lstrip("@"))
-            await set_config(f"poster_cars_channel:{chat_id}", str(target_id))
-            await message.reply(f"📢 Объявления машин будут поститься в чат {target_id}")
-        except ValueError:
-            await message.reply("❌ Укажите числовой ID чата (можно получить через @getmyid_bot)")
+    if action == "канал":
+        if len(args) >= 3:
+            target_raw = args[2].lower()
+            if target_raw in ("этот_чат", "this_chat", "здесь"):
+                await set_config(f"poster_cars_channel:{chat_id}", "")
+                await message.reply("📢 Объявления будут поститься в этот чат")
+                return
+            try:
+                target_id = int(target_raw)
+            except ValueError:
+                try:
+                    chat = await message.bot.get_chat(target_raw)
+                    target_id = chat.id
+                except Exception:
+                    await message.reply(
+                        "❌ Не могу найти чат. Используй:\n"
+                        "• ID канала (напр. -1001234567890) — узнать через @getmyid_bot\n"
+                        "• @username канала (бот должен быть админом в канале)",
+                        parse_mode="HTML",
+                    )
+                    return
+            if target_id == message.chat.id:
+                await set_config(f"poster_cars_channel:{chat_id}", "")
+                await message.reply("📢 Объявления будут поститься в этот чат")
+            else:
+                await set_config(f"poster_cars_channel:{chat_id}", str(target_id))
+                await message.reply(f"📢 Объявления машин будут поститься в чат {target_id}")
+        else:
+            current = await get_config(f"poster_cars_channel:{chat_id}")
+            if current:
+                await message.reply(f"📢 Текущий канал машин: <code>{current}</code>\n"
+                                    f"Чтобы сбросить (постить сюда): <code>!объявления канал этот_чат</code>",
+                                    parse_mode="HTML")
+            else:
+                await message.reply("📢 Сейчас объявления постятся в этот чат.\n"
+                                    "Чтобы задать канал: <code>!объявления канал @channel</code>",
+                                    parse_mode="HTML")
     elif action == "вкл":
         await set_config(f"poster_enabled:{chat_id}", "1")
         chats = await get_config("poster_chats") or ""
