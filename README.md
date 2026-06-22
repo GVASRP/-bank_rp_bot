@@ -103,9 +103,38 @@ flyctl deploy
 
 ---
 
-### 🔷 Render.com — НЕ подходит
+### 🔷 Render.com — бесплатно, без карты ✅
 
-На бесплатном тарифе сервис засыпает после 15 минут простоя. Для бота это критично — первое сообщение утром может не дойти или прийти с задержкой в 30+ секунд.
+На бесплатном тарифе сервис засыпает после 15 минут простоя. Но это решается:
+
+**Шаг 1 — Создай Web Service**
+1. https://dashboard.render.com → New → Web Service
+2. Подключи GitHub → выбери `-bank_rp_bot`
+3. Настройки:
+   - **Name**: `bank-rp-bot`
+   - **Runtime**: `Docker`
+   - **Plan**: **Free**
+   - **Environment Variables**:
+     - `BOT_TOKEN` = `твой_токен`
+4. **Create Web Service**
+
+**Шаг 2 — PostgreSQL (чтобы данные не пропадали)**
+1. На Render → **New** → **PostgreSQL**
+2. **Plan**: **Free** (512 MB)
+3. **Create**
+4. Скопируй **Internal Database URL**
+5. Зайди в свой Web Service → **Environment** → **Add Env Variable**:
+   - `DATABASE_URL` = вставь скопированную строку
+6. **Manual Deploy** → **Deploy latest commit**
+
+**Шаг 3 — UptimeRobot (чтобы не засыпал)**
+1. https://uptimerobot.com → Sign Up
+2. **Add New Monitor** → **HTTP(s)**
+3. URL: `https://bank-rp-bot.onrender.com/health`
+4. Interval: **5 minutes**
+5. **Create Monitor**
+
+Теперь бот работает 24/7, данные хранятся в PostgreSQL и не пропадают.
 
 ---
 

@@ -1,8 +1,10 @@
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
+from aiogram.types import Message
+
+from database import get_user_by_username
 
 ADMIN_CACHE = {}
-ADMIN_CACHE_TTL = 60
 
 
 def format_amount(amount: int) -> str:
@@ -31,6 +33,35 @@ async def is_admin(bot: Bot, chat_id: int, user_id: int, force_refresh: bool = F
         return result
     except Exception:
         return False
+
+
+async def resolve_target(message: Message, args: list) -> tuple[int | None, str | None, str]:
+    if message.reply_to_message:
+        target = message.reply_to_message.from_user
+        return target.id, target.full_name, ""
+
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == "text_mention":
+                return entity.user.id, entity.user.full_name, ""
+
+    username = ""
+    if len(args) > 1:
+        username = args[1].lstrip("@")
+        user = await get_user_by_username(username)
+        if user:
+            return user["telegram_id"], user.get("first_name") or username, ""
+
+    hint = ""
+    if username:
+        hint = (
+            f"Пользователь @{username} не найден в базе.\n"
+            f"Варианты:\n"
+            f"1️⃣ Ответь на сообщение пользователя и напиши команду\n"
+            f"2️⃣ Набери @ и выбери пользователя из списка (inline-упоминание)\n"
+            f"3️⃣ Попроси пользователя написать /баланс — он зарегистрируется"
+        )
+    return None, None, hint
 
 
 def get_user_mention(user_id: int, first_name: str = "Пользователь") -> str:

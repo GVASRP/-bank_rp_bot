@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
 from config import BOT_TOKEN, BOT_PROXY
-from database import init_db
+from database import init_db, close_conn
 from handlers import router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
@@ -69,6 +69,7 @@ async def main():
         await dp.start_polling(bot, allowed_updates=["message"])
     finally:
         await bot.session.close()
+        await close_conn()
 
 
 if __name__ == "__main__":

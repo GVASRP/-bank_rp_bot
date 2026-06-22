@@ -4,35 +4,15 @@ from aiogram.types import Message
 
 from database import (
     get_or_create_user,
-    get_user_by_telegram_id,
-    get_user_by_username,
     update_balance,
     add_transaction,
     get_transactions,
     create_credit_request,
     create_deposit_request,
-    get_balance,
 )
-from utils import format_amount, parse_amount
+from utils import format_amount, parse_amount, resolve_target
 
 router = Router()
-
-
-async def resolve_target(message: Message, args: list) -> tuple[int | None, str | None]:
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-        return target.id, target.full_name
-    if message.entities:
-        for entity in message.entities:
-            if entity.type == "text_mention":
-                return entity.user.id, entity.user.full_name
-    if len(args) > 1:
-        username = args[1].lstrip("@")
-        user = await get_user_by_username(username)
-        if user:
-            return user["telegram_id"], user.get("first_name") or username
-        return None, username
-    return None, None
 
 
 @router.message(Command("баланс"))
@@ -61,13 +41,9 @@ async def cmd_transfer(message: Message):
         await message.reply("❌ Укажите корректную сумму (целое положительное число)", parse_mode="HTML")
         return
 
-    target_id, target_name = await resolve_target(message, args)
+    target_id, target_name, hint = await resolve_target(message, args)
     if target_id is None:
-        await message.reply(
-            "❌ Пользователь не найден. Упомяните его через @, используйте встроенное упоминание Telegram "
-            "или ответьте на его сообщение.",
-            parse_mode="HTML",
-        )
+        await message.reply(hint or "❌ Пользователь не найден", parse_mode="HTML")
         return
 
     if target_id == message.from_user.id:

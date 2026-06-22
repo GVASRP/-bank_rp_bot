@@ -1,254 +1,396 @@
-import aiosqlite
+import os
 from typing import Optional
 
-DATABASE = "bank.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_FILE = "bank.db"
+
+_is_pg = DATABASE_URL is not None
+_pg_conn = None
 
 
-async def get_db():
-    db = await aiosqlite.connect(DATABASE)
-    db.row_factory = aiosqlite.Row
-    return db
+async def get_conn():
+    global _pg_conn
+    if _is_pg:
+        if _pg_conn is None:
+            import asyncpg
+            _pg_conn = await asyncpg.connect(DATABASE_URL)
+        return _pg_conn
+    else:
+        import aiosqlite
+        db = await aiosqlite.connect(DATABASE_FILE)
+        db.row_factory = aiosqlite.Row
+        return db
+
+
+async def close_conn():
+    global _pg_conn
+    if _pg_conn is not None:
+        await _pg_conn.close()
+        _pg_conn = None
 
 
 async def init_db():
-    db = await get_db()
-    try:
-        await db.executescript("""
+    if _is_pg:
+        conn = await get_conn()
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_id INTEGER UNIQUE NOT NULL,
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT UNIQUE NOT NULL,
                 username TEXT,
                 first_name TEXT,
                 balance INTEGER DEFAULT 0
-            );
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 type TEXT NOT NULL,
-                sender_telegram_id INTEGER,
-                receiver_telegram_id INTEGER,
+                sender_telegram_id BIGINT,
+                receiver_telegram_id BIGINT,
                 amount INTEGER NOT NULL,
                 description TEXT,
-                created_at TEXT DEFAULT (datetime('now', 'localtime'))
-            );
-            CREATE TABLE IF NOT EXISTS credit_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_telegram_id INTEGER NOT NULL,
-                amount INTEGER NOT NULL,
-                status TEXT DEFAULT 'pending',
-                created_at TEXT DEFAULT (datetime('now', 'localtime'))
-            );
-            CREATE TABLE IF NOT EXISTS deposit_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_telegram_id INTEGER NOT NULL,
-                amount INTEGER NOT NULL,
-                status TEXT DEFAULT 'pending',
-                created_at TEXT DEFAULT (datetime('now', 'localtime'))
-            );
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
         """)
-        await db.commit()
-    finally:
-        await db.close()
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS credit_requests (
+                id SERIAL PRIMARY KEY,
+                user_telegram_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS deposit_requests (
+                id SERIAL PRIMARY KEY,
+                user_telegram_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+    else:
+        conn = await get_conn()
+        try:
+            await conn.executescript("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER UNIQUE NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    balance INTEGER DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    sender_telegram_id INTEGER,
+                    receiver_telegram_id INTEGER,
+                    amount INTEGER NOT NULL,
+                    description TEXT,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS credit_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_telegram_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS deposit_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_telegram_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+            """)
+            await conn.commit()
+        finally:
+            await conn.close()
 
 
 async def get_or_create_user(telegram_id: int, username: Optional[str] = None, first_name: Optional[str] = None) -> dict:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
-        user = await cursor.fetchone()
-        if not user:
-            await db.execute(
-                "INSERT INTO users (telegram_id, username, first_name, balance) VALUES (?, ?, ?, 0)",
-                (telegram_id, username, first_name),
-            )
-            await db.commit()
-            cursor = await db.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
-            user = await cursor.fetchone()
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+            if not row:
+                row = await conn.fetchrow(
+                    "INSERT INTO users (telegram_id, username, first_name, balance) VALUES ($1, $2, $3, 0) RETURNING *",
+                    telegram_id, username, first_name,
+                )
+            elif username or first_name:
+                await conn.execute(
+                    "UPDATE users SET username = COALESCE($1, username), first_name = COALESCE($2, first_name) WHERE telegram_id = $3",
+                    username, first_name, telegram_id,
+                )
+                row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+            return dict(row)
         else:
-            needs_update = False
-            updates = []
-            if username and user["username"] != username:
-                updates.append(f"username = '{username}'")
-                needs_update = True
-            if first_name and user["first_name"] != first_name:
-                updates.append(f"first_name = '{first_name}'")
-                needs_update = True
-            if needs_update:
-                await db.execute(
+            cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+            user = await cursor.fetchone()
+            if not user:
+                await conn.execute(
+                    "INSERT INTO users (telegram_id, username, first_name, balance) VALUES (?, ?, ?, 0)",
+                    (telegram_id, username, first_name),
+                )
+                await conn.commit()
+                cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+                user = await cursor.fetchone()
+            elif (username and user["username"] != username) or (first_name and user["first_name"] != first_name):
+                await conn.execute(
                     "UPDATE users SET username = ?, first_name = ? WHERE telegram_id = ?",
                     (username or user["username"], first_name or user["first_name"], telegram_id),
                 )
-                await db.commit()
-                cursor = await db.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+                await conn.commit()
+                cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
                 user = await cursor.fetchone()
-        return dict(user)
+            return dict(user)
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_user_by_telegram_id(telegram_id: int) -> Optional[dict]:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
-        user = await cursor.fetchone()
-        return dict(user) if user else None
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_user_by_username(username: str) -> Optional[dict]:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
-        user = await cursor.fetchone()
-        return dict(user) if user else None
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", username)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM users WHERE username = ?", (username,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def update_balance(telegram_id: int, amount: int) -> None:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        await db.execute(
-            "UPDATE users SET balance = balance + ? WHERE telegram_id = ?",
-            (amount, telegram_id),
-        )
-        await db.commit()
+        if _is_pg:
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE telegram_id = $2", amount, telegram_id)
+        else:
+            await conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (amount, telegram_id))
+            await conn.commit()
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def set_balance(telegram_id: int, amount: int) -> None:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        await db.execute(
-            "UPDATE users SET balance = ? WHERE telegram_id = ?",
-            (amount, telegram_id),
-        )
-        await db.commit()
+        if _is_pg:
+            await conn.execute("UPDATE users SET balance = $1 WHERE telegram_id = $2", amount, telegram_id)
+        else:
+            await conn.execute("UPDATE users SET balance = ? WHERE telegram_id = ?", (amount, telegram_id))
+            await conn.commit()
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_balance(telegram_id: int) -> int:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute("SELECT balance FROM users WHERE telegram_id = ?", (telegram_id,))
-        row = await cursor.fetchone()
-        return row["balance"] if row else 0
+        if _is_pg:
+            row = await conn.fetchrow("SELECT balance FROM users WHERE telegram_id = $1", telegram_id)
+            return row["balance"] if row else 0
+        else:
+            cursor = await conn.execute("SELECT balance FROM users WHERE telegram_id = ?", (telegram_id,))
+            row = await cursor.fetchone()
+            return row["balance"] if row else 0
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def add_transaction(type_: str, sender_id: Optional[int], receiver_id: Optional[int], amount: int, description: str = "") -> None:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        await db.execute(
-            "INSERT INTO transactions (type, sender_telegram_id, receiver_telegram_id, amount, description) VALUES (?, ?, ?, ?, ?)",
-            (type_, sender_id, receiver_id, amount, description),
-        )
-        await db.commit()
+        if _is_pg:
+            await conn.execute(
+                "INSERT INTO transactions (type, sender_telegram_id, receiver_telegram_id, amount, description) VALUES ($1, $2, $3, $4, $5)",
+                type_, sender_id, receiver_id, amount, description,
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO transactions (type, sender_telegram_id, receiver_telegram_id, amount, description) VALUES (?, ?, ?, ?, ?)",
+                (type_, sender_id, receiver_id, amount, description),
+            )
+            await conn.commit()
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_transactions(telegram_id: int, limit: int = 10) -> list:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute(
-            "SELECT * FROM transactions WHERE sender_telegram_id = ? OR receiver_telegram_id = ? ORDER BY created_at DESC LIMIT ?",
-            (telegram_id, telegram_id, limit),
-        )
-        rows = await cursor.fetchall()
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM transactions WHERE sender_telegram_id = $1 OR receiver_telegram_id = $1 ORDER BY created_at DESC LIMIT $2",
+                telegram_id, limit,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM transactions WHERE sender_telegram_id = ? OR receiver_telegram_id = ? ORDER BY created_at DESC LIMIT ?",
+                (telegram_id, telegram_id, limit),
+            )
+            rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def create_credit_request(user_telegram_id: int, amount: int) -> int:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute(
-            "INSERT INTO credit_requests (user_telegram_id, amount) VALUES (?, ?)",
-            (user_telegram_id, amount),
-        )
-        await db.commit()
-        return cursor.lastrowid
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO credit_requests (user_telegram_id, amount) VALUES ($1, $2) RETURNING id",
+                user_telegram_id, amount,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO credit_requests (user_telegram_id, amount) VALUES (?, ?)",
+                (user_telegram_id, amount),
+            )
+            await conn.commit()
+            return cursor.lastrowid
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_credit_requests(status: str = "pending") -> list:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute(
-            "SELECT * FROM credit_requests WHERE status = ? ORDER BY created_at DESC",
-            (status,),
-        )
-        rows = await cursor.fetchall()
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM credit_requests WHERE status = $1 ORDER BY created_at DESC", status,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM credit_requests WHERE status = ? ORDER BY created_at DESC", (status,),
+            )
+            rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_credit_request(request_id: int) -> Optional[dict]:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute("SELECT * FROM credit_requests WHERE id = ?", (request_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM credit_requests WHERE id = $1", request_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM credit_requests WHERE id = ?", (request_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def update_credit_request(request_id: int, status: str) -> None:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        await db.execute("UPDATE credit_requests SET status = ? WHERE id = ?", (status, request_id))
-        await db.commit()
+        if _is_pg:
+            await conn.execute("UPDATE credit_requests SET status = $1 WHERE id = $2", status, request_id)
+        else:
+            await conn.execute("UPDATE credit_requests SET status = ? WHERE id = ?", (status, request_id))
+            await conn.commit()
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def create_deposit_request(user_telegram_id: int, amount: int) -> int:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute(
-            "INSERT INTO deposit_requests (user_telegram_id, amount) VALUES (?, ?)",
-            (user_telegram_id, amount),
-        )
-        await db.commit()
-        return cursor.lastrowid
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO deposit_requests (user_telegram_id, amount) VALUES ($1, $2) RETURNING id",
+                user_telegram_id, amount,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO deposit_requests (user_telegram_id, amount) VALUES (?, ?)",
+                (user_telegram_id, amount),
+            )
+            await conn.commit()
+            return cursor.lastrowid
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_deposit_requests(status: str = "pending") -> list:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute(
-            "SELECT * FROM deposit_requests WHERE status = ? ORDER BY created_at DESC",
-            (status,),
-        )
-        rows = await cursor.fetchall()
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM deposit_requests WHERE status = $1 ORDER BY created_at DESC", status,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM deposit_requests WHERE status = ? ORDER BY created_at DESC", (status,),
+            )
+            rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def get_deposit_request(request_id: int) -> Optional[dict]:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        cursor = await db.execute("SELECT * FROM deposit_requests WHERE id = ?", (request_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM deposit_requests WHERE id = $1", request_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM deposit_requests WHERE id = ?", (request_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
 
 
 async def update_deposit_request(request_id: int, status: str) -> None:
-    db = await get_db()
+    conn = await get_conn()
     try:
-        await db.execute("UPDATE deposit_requests SET status = ? WHERE id = ?", (status, request_id))
-        await db.commit()
+        if _is_pg:
+            await conn.execute("UPDATE deposit_requests SET status = $1 WHERE id = $2", status, request_id)
+        else:
+            await conn.execute("UPDATE deposit_requests SET status = ? WHERE id = ?", (status, request_id))
+            await conn.commit()
     finally:
-        await db.close()
+        if not _is_pg:
+            await conn.close()
