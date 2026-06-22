@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 
 import aiohttp
 import feedparser
@@ -36,25 +37,65 @@ async def fetch_rss(city_slug: str) -> list:
 
 
 def extract_price(text: str) -> str:
-    m = __import__("re").search(r'\$[\d,]+', text)
+    m = re.search(r'\$[\d,]+', text)
     return m.group(0) if m else ""
 
 
-def format_entry(entry, city_name: str) -> str | None:
+def extract_image(summary: str) -> str | None:
+    m = re.search(r'<img[^>]+src="([^"]+)"', summary)
+    return m.group(1) if m else None
+
+
+def clean_summary(summary: str) -> str:
+    return re.sub(r'<[^>]+>', '', summary).strip()[:200]
+
+
+def build_caption(entry, city_name: str) -> str | None:
     title = entry.get("title", "").strip()
     link = entry.get("link", "")
-    summary = entry.get("summary", "")
     price = extract_price(title)
-    desc = summary
+    desc = clean_summary(entry.get("summary", ""))
     if not title:
         return None
     msg = f"🚗 <b>{title}</b>\n📍 {city_name}, WI\n"
     if price:
         msg += f"💰 {price}\n"
     if desc:
-        msg += f"📝 {desc[:200]}\n"
+        msg += f"📝 {desc}\n"
     msg += f"🔗 {link}"
     return msg
+
+
+async def send_listing(bot, chat_id: int, entry, city_name: str) -> bool:
+    guid = entry.get("id") or entry.get("link", "")
+    if await is_listing_posted(guid):
+        return False
+
+    caption = build_caption(entry, city_name)
+    if not caption:
+        return False
+
+    img_url = extract_image(entry.get("summary", ""))
+
+    try:
+        if img_url:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(img_url, headers=HEADERS, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        from aiogram.types import BufferedInputFile
+                        photo = BufferedInputFile(data, filename="car.jpg")
+                        await bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML")
+                    else:
+                        await bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+        else:
+            await bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+
+        await mark_listing_posted(guid)
+        return True
+    except Exception as e:
+        logger.error("Send error: %s", e)
+        return False
 
 
 async def post_new_car(bot, chat_id: int) -> bool:
@@ -69,19 +110,8 @@ async def post_new_car(bot, chat_id: int) -> bool:
             continue
 
         for entry in entries:
-            guid = entry.get("id") or entry.get("link", "")
-            if not guid or await is_listing_posted(guid):
-                continue
-            text = format_entry(entry, city_name)
-            if not text:
-                continue
-            try:
-                await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
-                await mark_listing_posted(guid)
+            if await send_listing(bot, chat_id, entry, city_name):
                 return True
-            except Exception as e:
-                logger.error("Send error: %s", e)
-                return False
 
     return False
 
@@ -94,18 +124,31 @@ async def force_post_one(bot, chat_id: int) -> str:
         except Exception as e:
             continue
         for entry in entries:
-            guid = entry.get("id") or entry.get("link", "")
-            text = format_entry(entry, city_name)
-            if not text:
+            caption = build_caption(entry, city_name)
+            if not caption:
                 continue
             try:
-                await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+                img_url = extract_image(entry.get("summary", ""))
+                if img_url:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(img_url, headers=HEADERS, timeout=10) as resp:
+                            if resp.status == 200:
+                                data = await resp.read()
+                                from aiogram.types import BufferedInputFile
+                                photo = BufferedInputFile(data, filename="car.jpg")
+                                await bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML")
+                            else:
+                                await bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+                else:
+                    await bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+
+                guid = entry.get("id") or entry.get("link", "")
                 if guid:
                     await mark_listing_posted(guid)
                 return f"✅ {entry.get('title','')[:60]} — {city_name}"
             except Exception as e:
                 return f"❌ Ошибка: {e}"
-    return "❌ Нет объявлений (проверь интернет или Craigslist блокирует)"
+    return "❌ Нет объявлений (возможно Craigslist блокирует запросы)"
 
 
 async def auto_poster_loop(bot):
