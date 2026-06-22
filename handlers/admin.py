@@ -401,44 +401,28 @@ async def cmd_all_deposits(message: Message):
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-CITY_NAMES = {
-    "newyork": "Нью-Йорк", "losangeles": "Лос-Анджелес", "chicago": "Чикаго",
-    "houston": "Хьюстон", "phoenix": "Финикс", "sandiego": "Сан-Диего",
-    "dallas": "Даллас", "miami": "Майами", "seattle": "Сиэтл",
-    "sfbay": "Сан-Франциско", "boston": "Бостон", "denver": "Денвер",
-    "lasvegas": "Лас-Вегас", "portland": "Портленд", "atlanta": "Атланта",
-    "wisconsin": "Весь Висконсин",
-    "appleton-oshkosh-fdl": "Апплтон (Fox Cities)", "eauclaire": "О-Клэр", "greenbay": "Грин-Бей",
-    "janesville": "Джейнсвилл", "kenosha-racine": "Кеноша-Расин", "lacrosse": "Ла-Кросс",
-    "madison": "Мадисон", "milwaukee": "Милуоки", "sheboygan": "Шебойган",
-    "wausau": "Восау", "northernwi": "Северный Висконсин",
-}
-
-
 @router.message(Command("объявления", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_auto_posts(message: Message):
     if not await ensure_admin(message):
         return
 
+    chat_id = message.chat.id
     args = message.text.split(maxsplit=2)
+
     if len(args) < 2:
-        enabled = await get_config("poster_enabled")
-        city = await get_config("poster_city") or "newyork"
-        interval = await get_config("poster_interval") or "120"
-        city_name = CITY_NAMES.get(city, city)
+        enabled = await get_config(f"poster_enabled:{chat_id}")
+        interval = await get_config(f"poster_interval:{chat_id}") or "120"
         status = "✅ Включены" if enabled == "1" else "❌ Выключены"
         await message.reply(
             f"📢 <b>Авто-объявления</b>\n"
             f"Статус: {status}\n"
-            f"Город: {city_name}\n"
             f"Интервал: {interval} мин\n\n"
             f"Команды:\n"
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
-            f"<code>!объявления город wisconsin</code> — весь Висконсин\n"
             f"<code>!объявления интервал 1</code> — интервал в минутах\n"
-            f"<code>!объявления тест</code> — принудительно показать 1 объявление\n\n"
-            f"🚗 Постит реальные объявления о продаже машин с Craigslist",
+            f"<code>!объявления тест</code> — показать 1 объявление\n\n"
+            f"🚗 Реальные авто из Висконсина с фото (Wikipedia)",
             parse_mode="HTML",
         )
         return
@@ -446,31 +430,26 @@ async def cmd_auto_posts(message: Message):
     action = args[1]
 
     if action == "вкл":
-        await set_config("poster_enabled", "1")
-        await set_config("poster_chat_id", str(message.chat.id))
+        await set_config(f"poster_enabled:{chat_id}", "1")
+        chats = await get_config("poster_chats") or ""
+        if str(chat_id) not in chats.split(","):
+            new_chats = ",".join(filter(None, [*chats.split(","), str(chat_id)]))
+            await set_config("poster_chats", new_chats)
         await message.reply("✅ Авто-объявления включены")
     elif action == "выкл":
-        await set_config("poster_enabled", "0")
+        await set_config(f"poster_enabled:{chat_id}", "0")
         await message.reply("❌ Авто-объявления выключены")
-    elif action == "город" and len(args) >= 3:
-        city = args[2].strip().lower()
-        if city not in CITY_NAMES:
-            cities = ", ".join(CITY_NAMES.keys())
-            await message.reply(f"❌ Город не найден. Доступны: {cities}")
-            return
-        await set_config("poster_city", city)
-        await message.reply(f"✅ Город установлен: {CITY_NAMES[city]}")
     elif action == "интервал" and len(args) >= 3:
         try:
             minutes = int(args[2])
             if minutes < 1:
                 minutes = 1
-            await set_config("poster_interval", str(minutes))
+            await set_config(f"poster_interval:{chat_id}", str(minutes))
             await message.reply(f"✅ Интервал: {minutes} минут")
         except ValueError:
             await message.reply("❌ Укажите число минут")
     elif action == "тест":
-        result = await force_post_one(message.bot, message.chat.id)
+        result = await force_post_one(message.bot, chat_id)
         await message.reply(result, parse_mode="HTML")
     else:
-        await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, город, интервал, тест")
+        await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, интервал, тест")
