@@ -93,6 +93,18 @@ async def init_db():
             except Exception:
                 pass
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS posted_listings (
+                guid TEXT PRIMARY KEY,
+                posted_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS deposits (
                 id SERIAL PRIMARY KEY,
                 user_telegram_id BIGINT NOT NULL,
@@ -146,6 +158,14 @@ async def init_db():
                     duration_days INTEGER DEFAULT 30,
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS posted_listings (
+                    guid TEXT PRIMARY KEY,
+                    posted_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS deposits (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -668,6 +688,67 @@ async def get_all_deposits(status: str = "active") -> list:
             )
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def is_listing_posted(guid: str) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT 1 FROM posted_listings WHERE guid = $1", guid)
+            return row is not None
+        else:
+            cursor = await conn.execute("SELECT 1 FROM posted_listings WHERE guid = ?", (guid,))
+            return cursor.fetchone() is not None
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def mark_listing_posted(guid: str) -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute("INSERT INTO posted_listings (guid) VALUES ($1) ON CONFLICT DO NOTHING", guid)
+        else:
+            await conn.execute("INSERT OR IGNORE INTO posted_listings (guid) VALUES (?)", (guid,))
+            await conn.commit()
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_config(key: str) -> str | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT value FROM config WHERE key = $1", key)
+            return row["value"] if row else None
+        else:
+            cursor = await conn.execute("SELECT value FROM config WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            return row["value"] if row else None
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def set_config(key: str, value: str) -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute(
+                "INSERT INTO config (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+                key, value,
+            )
+        else:
+            await conn.execute(
+                "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            await conn.commit()
     finally:
         if not _is_pg:
             await conn.close()

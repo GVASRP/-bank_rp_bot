@@ -18,6 +18,8 @@ from database import (
     get_deposit_requests,
     get_all_deposits,
     create_deposit_account,
+    get_config,
+    set_config,
 )
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
 
@@ -396,3 +398,69 @@ async def cmd_all_deposits(message: Message):
         )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+CITY_NAMES = {
+    "newyork": "Нью-Йорк", "losangeles": "Лос-Анджелес", "chicago": "Чикаго",
+    "houston": "Хьюстон", "phoenix": "Финикс", "sandiego": "Сан-Диего",
+    "dallas": "Даллас", "miami": "Майами", "seattle": "Сиэтл",
+    "sfbay": "Сан-Франциско", "boston": "Бостон", "denver": "Денвер",
+    "lasvegas": "Лас-Вегас", "portland": "Портленд", "atlanta": "Атланта",
+}
+
+
+@router.message(Command("объявления", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_auto_posts(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    args = message.text.split(maxsplit=2)
+    if len(args) < 2:
+        enabled = await get_config("poster_enabled")
+        city = await get_config("poster_city") or "newyork"
+        interval = await get_config("poster_interval") or "120"
+        city_name = CITY_NAMES.get(city, city)
+        status = "✅ Включены" if enabled == "1" else "❌ Выключены"
+        await message.reply(
+            f"📢 <b>Авто-объявления</b>\n"
+            f"Статус: {status}\n"
+            f"Город: {city_name}\n"
+            f"Интервал: {interval} мин\n\n"
+            f"Команды:\n"
+            f"<code>!объявления вкл</code> — включить\n"
+            f"<code>!объявления выкл</code> — выключить\n"
+            f"<code>!объявления город newyork</code> — сменить город\n"
+            f"<code>!объявления интервал 120</code> — интервал в минутах",
+            parse_mode="HTML",
+        )
+        return
+
+    action = args[1]
+
+    if action == "вкл":
+        await set_config("poster_enabled", "1")
+        await set_config("poster_chat_id", str(message.chat.id))
+        await message.reply("✅ Авто-объявления включены")
+    elif action == "выкл":
+        await set_config("poster_enabled", "0")
+        await message.reply("❌ Авто-объявления выключены")
+    elif action == "город" and len(args) >= 3:
+        city = args[2].strip().lower()
+        if city not in CITY_NAMES:
+            cities = ", ".join(CITY_NAMES.keys())
+            await message.reply(f"❌ Город не найден. Доступны: {cities}")
+            return
+        await set_config("poster_city", city)
+        await message.reply(f"✅ Город установлен: {CITY_NAMES[city]}")
+    elif action == "интервал" and len(args) >= 3:
+        try:
+            minutes = int(args[2])
+            if minutes < 10:
+                await message.reply("❌ Минимальный интервал — 10 минут")
+                return
+            await set_config("poster_interval", str(minutes))
+            await message.reply(f"✅ Интервал: {minutes} минут")
+        except ValueError:
+            await message.reply("❌ Укажите число минут")
+    else:
+        await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, город, интервал")

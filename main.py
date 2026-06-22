@@ -10,6 +10,7 @@ from aiogram.enums import ParseMode
 from config import BOT_TOKEN, BOT_PROXY
 from database import init_db, close_conn
 from handlers import router
+from auto_poster import auto_poster_loop
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ async def main():
     dp.include_router(router)
 
     await run_web_server()
+    asyncio.create_task(auto_poster_loop(bot))
 
     logger.info("Бот запущен!")
     try:
