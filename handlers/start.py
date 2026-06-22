@@ -5,7 +5,7 @@ from aiogram.types import Message
 router = Router()
 
 
-@router.message(Command("start", "help", prefixes="!"))
+@router.message(Command("start", "help", prefixes="/!"))
 async def cmd_start(message: Message):
     text = (
         "🏦 <b>Банковская система RP</b>\n\n"

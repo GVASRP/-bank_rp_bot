@@ -16,17 +16,17 @@ from utils import format_amount, parse_amount, resolve_target
 router = Router()
 
 
-@router.message(Command("баланс", prefixes="!"))
+@router.message(Command("баланс", prefixes="/!"))
 async def cmd_balance(message: Message):
     user = await get_or_create_user(
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
     )
-    await message.reply(f"💰 Ваш баланс: <b>{format_amount(user['balance'])}</b> монет", parse_mode="HTML")
+    await message.reply(f"💰 Ваш баланс: <b>{format_amount(user['balance'])}</b> долларов", parse_mode="HTML")
 
 
-@router.message(Command("перевести", prefixes="!"))
+@router.message(Command("перевести", prefixes="/!"))
 async def cmd_transfer(message: Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
@@ -58,7 +58,7 @@ async def cmd_transfer(message: Message):
     )
     if sender["balance"] < amount:
         await message.reply(
-            f"❌ Недостаточно средств. Баланс: <b>{format_amount(sender['balance'])}</b> монет",
+            f"❌ Недостаточно средств. Баланс: <b>{format_amount(sender['balance'])}</b> долларов",
             parse_mode="HTML",
         )
         return
@@ -74,12 +74,12 @@ async def cmd_transfer(message: Message):
     )
 
     await message.reply(
-        f"✅ Переведено <b>{format_amount(amount)}</b> монет пользователю {target_name}",
+        f"✅ Переведено <b>{format_amount(amount)}</b> долларов пользователю {target_name}",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("история", prefixes="!"))
+@router.message(Command("история", prefixes="/!"))
 async def cmd_history(message: Message):
     await get_or_create_user(
         message.from_user.id,
@@ -110,7 +110,7 @@ async def cmd_history(message: Message):
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("рейтинг", prefixes="!"))
+@router.message(Command("рейтинг", prefixes="/!"))
 async def cmd_ranking(message: Message):
     users = await get_all_users_ranked()
     if not users:
@@ -122,12 +122,12 @@ async def cmd_ranking(message: Message):
     for i, user in enumerate(users, 1):
         prefix = medals[i - 1] if i <= 3 else f"{i}."
         name = user.get("first_name") or user.get("username") or f"ID {user['telegram_id']}"
-        lines.append(f"{prefix} {name} — <b>{format_amount(user['balance'])}</b> монет")
+        lines.append(f"{prefix} {name} — <b>{format_amount(user['balance'])}</b> долларов")
 
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("запросить_кредит", prefixes="!"))
+@router.message(Command("запросить_кредит", prefixes="/!"))
 async def cmd_request_credit(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
@@ -141,14 +141,14 @@ async def cmd_request_credit(message: Message):
 
     request_id = await create_credit_request(message.from_user.id, amount)
     await message.reply(
-        f"📄 Запрос на кредит <b>{format_amount(amount)}</b> монет отправлен!\n"
+        f"📄 Запрос на кредит <b>{format_amount(amount)}</b> долларов отправлен!\n"
         f"Номер заявки: <b>#{request_id}</b>\n"
         f"Ожидайте подтверждения администратора.",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("запросить_вклад", prefixes="!"))
+@router.message(Command("запросить_вклад", prefixes="/!"))
 async def cmd_request_deposit(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
@@ -167,14 +167,14 @@ async def cmd_request_deposit(message: Message):
     )
     if user["balance"] < amount:
         await message.reply(
-            f"❌ Недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> монет",
+            f"❌ Недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> долларов",
             parse_mode="HTML",
         )
         return
 
     request_id = await create_deposit_request(message.from_user.id, amount)
     await message.reply(
-        f"📄 Запрос на вклад <b>{format_amount(amount)}</b> монет отправлен!\n"
+        f"📄 Запрос на вклад <b>{format_amount(amount)}</b> долларов отправлен!\n"
         f"Номер заявки: <b>#{request_id}</b>\n"
         f"Ожидайте подтверждения администратора.",
         parse_mode="HTML",

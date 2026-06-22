@@ -31,7 +31,7 @@ async def ensure_admin(message: Message) -> bool:
     return True
 
 
-@router.message(Command("начислить", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("начислить", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_add_balance(message: Message):
     if not await ensure_admin(message):
         return
@@ -56,12 +56,12 @@ async def cmd_add_balance(message: Message):
     await add_transaction("admin_add", None, target_id, amount, f"Начислено админом {message.from_user.full_name}")
 
     await message.reply(
-        f"✅ Начислено <b>{format_amount(amount)}</b> монет пользователю {target_name}",
+        f"✅ Начислено <b>{format_amount(amount)}</b> долларов пользователю {target_name}",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("списать", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("списать", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_remove_balance(message: Message):
     if not await ensure_admin(message):
         return
@@ -84,7 +84,7 @@ async def cmd_remove_balance(message: Message):
     user = await get_or_create_user(target_id)
     if user["balance"] < amount:
         await message.reply(
-            f"❌ У пользователя недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> монет",
+            f"❌ У пользователя недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> долларов",
             parse_mode="HTML",
         )
         return
@@ -93,12 +93,12 @@ async def cmd_remove_balance(message: Message):
     await add_transaction("admin_remove", None, target_id, amount, f"Списано админом {message.from_user.full_name}")
 
     await message.reply(
-        f"✅ Списано <b>{format_amount(amount)}</b> монет у пользователя {target_name}",
+        f"✅ Списано <b>{format_amount(amount)}</b> долларов у пользователя {target_name}",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("установить_баланс", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("установить_баланс", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_set_balance(message: Message):
     if not await ensure_admin(message):
         return
@@ -124,12 +124,12 @@ async def cmd_set_balance(message: Message):
     await add_transaction("admin_set", None, target_id, amount, f"Баланс установлен админом {message.from_user.full_name} (было {old_balance})")
 
     await message.reply(
-        f"✅ Баланс пользователя {target_name} установлен на <b>{format_amount(amount)}</b> монет",
+        f"✅ Баланс пользователя {target_name} установлен на <b>{format_amount(amount)}</b> долларов",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("одобрить_кредит", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("одобрить_кредит", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_approve_credit(message: Message):
     if not await ensure_admin(message):
         return
@@ -158,13 +158,13 @@ async def cmd_approve_credit(message: Message):
     await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name}")
 
     await message.reply(
-        f"✅ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> монет одобрен!\n"
+        f"✅ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
         f"Средства зачислены пользователю.",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("отклонить_кредит", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("отклонить_кредит", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_reject_credit(message: Message):
     if not await ensure_admin(message):
         return
@@ -191,12 +191,12 @@ async def cmd_reject_credit(message: Message):
     await update_credit_request(request_id, "rejected")
 
     await message.reply(
-        f"❌ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> монет отклонён",
+        f"❌ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> долларов отклонён",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("одобрить_вклад", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("одобрить_вклад", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_approve_deposit(message: Message):
     if not await ensure_admin(message):
         return
@@ -234,13 +234,13 @@ async def cmd_approve_deposit(message: Message):
     await add_transaction("deposit", request["user_telegram_id"], None, request["amount"], f"Вклад #{request_id} одобрен админом {message.from_user.full_name}")
 
     await message.reply(
-        f"✅ Вклад #{request_id} на <b>{format_amount(request['amount'])}</b> монет одобрен!\n"
+        f"✅ Вклад #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
         f"Средства списаны со счёта пользователя.",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("отклонить_вклад", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("отклонить_вклад", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_reject_deposit(message: Message):
     if not await ensure_admin(message):
         return
@@ -267,12 +267,12 @@ async def cmd_reject_deposit(message: Message):
     await update_deposit_request(request_id, "rejected")
 
     await message.reply(
-        f"❌ Вклад #{request_id} на <b>{format_amount(request['amount'])}</b> монет отклонён",
+        f"❌ Вклад #{request_id} на <b>{format_amount(request['amount'])}</b> долларов отклонён",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("заявки", prefixes="!"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("заявки", prefixes="/!"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_list_requests(message: Message):
     if not await ensure_admin(message):
         return
@@ -291,7 +291,7 @@ async def cmd_list_requests(message: Message):
         for c in credits:
             user = await get_user_by_telegram_id(c["user_telegram_id"])
             name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
-            lines.append(f"  #{c['id']} — {name}: {format_amount(c['amount'])} монет")
+            lines.append(f"  #{c['id']} — {name}: {format_amount(c['amount'])} долларов")
         lines.append("")
 
     if deposits:
@@ -299,6 +299,6 @@ async def cmd_list_requests(message: Message):
         for d in deposits:
             user = await get_user_by_telegram_id(d["user_telegram_id"])
             name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
-            lines.append(f"  #{d['id']} — {name}: {format_amount(d['amount'])} монет")
+            lines.append(f"  #{d['id']} — {name}: {format_amount(d['amount'])} долларов")
 
     await message.reply("\n".join(lines), parse_mode="HTML")
