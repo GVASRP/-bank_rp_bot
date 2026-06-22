@@ -11,9 +11,11 @@ from database import (
     get_credit_request,
     update_credit_request,
     get_credit_requests,
+    create_credit,
     get_deposit_request,
     update_deposit_request,
     get_deposit_requests,
+    create_deposit_account,
 )
 from utils import format_amount, parse_amount, is_admin, get_user_mention, resolve_target
 
@@ -134,9 +136,9 @@ async def cmd_approve_credit(message: Message):
     if not await ensure_admin(message):
         return
 
-    args = message.text.split(maxsplit=1)
+    args = message.text.split(maxsplit=2)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!одобрить_кредит id</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!одобрить_кредит id [процент]</code>", parse_mode="HTML")
         return
 
     try:
@@ -144,6 +146,16 @@ async def cmd_approve_credit(message: Message):
     except ValueError:
         await message.reply("❌ Укажите числовой ID заявки")
         return
+
+    interest = 10
+    if len(args) >= 3:
+        try:
+            interest = int(args[2])
+            if interest < 0:
+                interest = 10
+        except ValueError:
+            await message.reply("❌ Процент должен быть числом (например: 10)")
+            return
 
     request = await get_credit_request(request_id)
     if not request:
@@ -153,12 +165,15 @@ async def cmd_approve_credit(message: Message):
         await message.reply(f"❌ Заявка #{request_id} уже обработана (статус: {request['status']})")
         return
 
+    remaining = request["amount"] + (request["amount"] * interest // 100)
     await update_credit_request(request_id, "approved")
+    await create_credit(request["user_telegram_id"], request["amount"], remaining)
     await update_balance(request["user_telegram_id"], request["amount"])
-    await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name}")
+    await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%)")
 
     await message.reply(
         f"✅ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
+        f"Процент: <b>{interest}%</b> | К погашению: <b>{format_amount(remaining)}</b>\n"
         f"Средства зачислены пользователю.",
         parse_mode="HTML",
     )
@@ -201,9 +216,9 @@ async def cmd_approve_deposit(message: Message):
     if not await ensure_admin(message):
         return
 
-    args = message.text.split(maxsplit=1)
+    args = message.text.split(maxsplit=2)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!одобрить_вклад id</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!одобрить_вклад id [процент]</code>", parse_mode="HTML")
         return
 
     try:
@@ -211,6 +226,16 @@ async def cmd_approve_deposit(message: Message):
     except ValueError:
         await message.reply("❌ Укажите числовой ID заявки")
         return
+
+    interest = 5
+    if len(args) >= 3:
+        try:
+            interest = int(args[2])
+            if interest < 0:
+                interest = 5
+        except ValueError:
+            await message.reply("❌ Процент должен быть числом (например: 5)")
+            return
 
     request = await get_deposit_request(request_id)
     if not request:
@@ -230,11 +255,13 @@ async def cmd_approve_deposit(message: Message):
         return
 
     await update_deposit_request(request_id, "approved")
+    await create_deposit_account(request["user_telegram_id"], request["amount"], interest)
     await update_balance(request["user_telegram_id"], -request["amount"])
-    await add_transaction("deposit", request["user_telegram_id"], None, request["amount"], f"Вклад #{request_id} одобрен админом {message.from_user.full_name}")
+    await add_transaction("deposit", request["user_telegram_id"], None, request["amount"], f"Вклад #{request_id} одобрен админом {message.from_user.full_name} ({interest}%)")
 
     await message.reply(
         f"✅ Вклад #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
+        f"Процент: <b>{interest}%</b>\n"
         f"Средства списаны со счёта пользователя.",
         parse_mode="HTML",
     )

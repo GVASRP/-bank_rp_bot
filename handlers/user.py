@@ -10,6 +10,12 @@ from database import (
     create_credit_request,
     create_deposit_request,
     get_all_users_ranked,
+    get_user_credits,
+    get_credit_by_id,
+    repay_credit,
+    get_user_deposits,
+    get_deposit_by_id,
+    withdraw_deposit,
 )
 from utils import format_amount, parse_amount, resolve_target
 
@@ -177,5 +183,145 @@ async def cmd_request_deposit(message: Message):
         f"📄 Запрос на вклад <b>{format_amount(amount)}</b> долларов отправлен!\n"
         f"Номер заявки: <b>#{request_id}</b>\n"
         f"Ожидайте подтверждения администратора.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("кредиты", prefix="!/"))
+async def cmd_my_credits(message: Message):
+    credits = await get_user_credits(message.from_user.id, "active")
+    if not credits:
+        await message.reply("📭 У вас нет активных кредитов")
+        return
+
+    lines = ["💳 <b>Ваши кредиты:</b>\n"]
+    for c in credits:
+        paid = c["amount"] - c["remaining"]
+        lines.append(
+            f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов\n"
+            f"   Погашено: {format_amount(paid)} | Остаток: {format_amount(c['remaining'])}\n"
+            f"   Статус: <b>активен</b>"
+        )
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("погасить", prefix="!/"))
+async def cmd_repay_credit(message: Message):
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.reply("❌ Использование: <code>!погасить id_кредита сумма</code>", parse_mode="HTML")
+        return
+
+    try:
+        credit_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID кредита должен быть числом")
+        return
+
+    amount = parse_amount(args[2])
+    if amount is None:
+        await message.reply("❌ Укажите корректную сумму")
+        return
+
+    credit = await get_credit_by_id(credit_id)
+    if not credit:
+        await message.reply(f"❌ Кредит #{credit_id} не найден")
+        return
+    if credit["user_telegram_id"] != message.from_user.id:
+        await message.reply("❌ Это не ваш кредит")
+        return
+    if credit["status"] != "active":
+        await message.reply("❌ Кредит уже погашен")
+        return
+
+    user = await get_or_create_user(
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+    )
+
+    overpay = amount > credit["remaining"]
+    if overpay:
+        amount = credit["remaining"]
+
+    if user["balance"] < amount:
+        await message.reply(
+            f"❌ Недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> долларов",
+            parse_mode="HTML",
+        )
+        return
+
+    await update_balance(message.from_user.id, -amount)
+    await repay_credit(credit_id, amount)
+    await add_transaction("repay", message.from_user.id, None, amount, f"Погашение кредита #{credit_id}")
+
+    credit = await get_credit_by_id(credit_id)
+    if credit["status"] == "paid":
+        await message.reply(
+            f"✅ Кредит #{credit_id} полностью погашен!\n"
+            f"Выплачено: <b>{format_amount(amount)}</b> долларов",
+            parse_mode="HTML",
+        )
+    else:
+        await message.reply(
+            f"✅ Погашено <b>{format_amount(amount)}</b> долларов по кредиту #{credit_id}\n"
+            f"Остаток: <b>{format_amount(credit['remaining'])}</b> долларов",
+            parse_mode="HTML",
+        )
+
+
+@router.message(Command("вклады", prefix="!/"))
+async def cmd_my_deposits(message: Message):
+    deposits = await get_user_deposits(message.from_user.id, "active")
+    if not deposits:
+        await message.reply("📭 У вас нет активных вкладов")
+        return
+
+    lines = ["🏛 <b>Ваши вклады:</b>\n"]
+    for d in deposits:
+        payout = d["amount"] + (d["amount"] * d["interest_rate"] // 100)
+        lines.append(
+            f"#{d['id']} — <b>{format_amount(d['amount'])}</b> долларов\n"
+            f"   Процент: {d['interest_rate']}% | К выплате: {format_amount(payout)}\n"
+            f"   Статус: <b>активен</b>"
+        )
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("вывести", prefix="!/"))
+async def cmd_withdraw_deposit(message: Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!вывести id_вклада</code>", parse_mode="HTML")
+        return
+
+    try:
+        deposit_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID вклада должен быть числом")
+        return
+
+    deposit = await get_deposit_by_id(deposit_id)
+    if not deposit:
+        await message.reply(f"❌ Вклад #{deposit_id} не найден")
+        return
+    if deposit["user_telegram_id"] != message.from_user.id:
+        await message.reply("❌ Это не ваш вклад")
+        return
+    if deposit["status"] != "active":
+        await message.reply("❌ Вклад уже выведен")
+        return
+
+    payout = deposit["amount"] + (deposit["amount"] * deposit["interest_rate"] // 100)
+    await withdraw_deposit(deposit_id)
+    await update_balance(message.from_user.id, payout)
+    await add_transaction("withdraw", None, message.from_user.id, payout, f"Вывод вклада #{deposit_id}")
+
+    await message.reply(
+        f"✅ Вклад #{deposit_id} выведен!\n"
+        f"Сумма: <b>{format_amount(deposit['amount'])}</b> + проценты <b>{format_amount(payout - deposit['amount'])}</b>\n"
+        f"Итого получено: <b>{format_amount(payout)}</b> долларов",
         parse_mode="HTML",
     )

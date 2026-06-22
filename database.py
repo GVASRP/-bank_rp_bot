@@ -70,6 +70,27 @@ async def init_db():
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS credits (
+                id SERIAL PRIMARY KEY,
+                user_telegram_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL,
+                remaining INTEGER NOT NULL,
+                interest_rate INTEGER DEFAULT 10,
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS deposits (
+                id SERIAL PRIMARY KEY,
+                user_telegram_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL,
+                interest_rate INTEGER DEFAULT 5,
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
     else:
         conn = await get_conn()
         try:
@@ -102,6 +123,23 @@ async def init_db():
                     user_telegram_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
                     status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS credits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_telegram_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    remaining INTEGER NOT NULL,
+                    interest_rate INTEGER DEFAULT 10,
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS deposits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_telegram_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    interest_rate INTEGER DEFAULT 5,
+                    status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
             """)
@@ -391,6 +429,170 @@ async def update_deposit_request(request_id: int, status: str) -> None:
         else:
             await conn.execute("UPDATE deposit_requests SET status = ? WHERE id = ?", (status, request_id))
             await conn.commit()
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def create_credit(user_telegram_id: int, amount: int, remaining: int) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO credits (user_telegram_id, amount, remaining) VALUES ($1, $2, $3) RETURNING id",
+                user_telegram_id, amount, remaining,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO credits (user_telegram_id, amount, remaining) VALUES (?, ?, ?)",
+                (user_telegram_id, amount, remaining),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_user_credits(user_telegram_id: int, status: str = "active") -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM credits WHERE user_telegram_id = $1 AND status = $2 ORDER BY created_at DESC",
+                user_telegram_id, status,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM credits WHERE user_telegram_id = ? AND status = ? ORDER BY created_at DESC",
+                (user_telegram_id, status),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_credit_by_id(credit_id: int) -> Optional[dict]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM credits WHERE id = $1", credit_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM credits WHERE id = ?", (credit_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def repay_credit(credit_id: int, amount: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM credits WHERE id = $1 FOR UPDATE", credit_id)
+            if not row or row["status"] != "active":
+                return False
+            new_remaining = row["remaining"] - amount
+            if new_remaining <= 0:
+                await conn.execute("UPDATE credits SET remaining = 0, status = 'paid' WHERE id = $1", credit_id)
+            else:
+                await conn.execute("UPDATE credits SET remaining = $1 WHERE id = $2", new_remaining, credit_id)
+            return True
+        else:
+            cursor = await conn.execute("SELECT * FROM credits WHERE id = ?", (credit_id,))
+            row = await cursor.fetchone()
+            if not row or row["status"] != "active":
+                return False
+            new_remaining = row["remaining"] - amount
+            if new_remaining <= 0:
+                await conn.execute("UPDATE credits SET remaining = 0, status = 'paid' WHERE id = ?", (credit_id,))
+            else:
+                await conn.execute("UPDATE credits SET remaining = ? WHERE id = ?", (new_remaining, credit_id))
+            await conn.commit()
+            return True
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def create_deposit_account(user_telegram_id: int, amount: int, interest_rate: int = 5) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO deposits (user_telegram_id, amount, interest_rate) VALUES ($1, $2, $3) RETURNING id",
+                user_telegram_id, amount, interest_rate,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO deposits (user_telegram_id, amount, interest_rate) VALUES (?, ?, ?)",
+                (user_telegram_id, amount, interest_rate),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_user_deposits(user_telegram_id: int, status: str = "active") -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM deposits WHERE user_telegram_id = $1 AND status = $2 ORDER BY created_at DESC",
+                user_telegram_id, status,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM deposits WHERE user_telegram_id = ? AND status = ? ORDER BY created_at DESC",
+                (user_telegram_id, status),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_deposit_by_id(deposit_id: int) -> Optional[dict]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM deposits WHERE id = $1", deposit_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def withdraw_deposit(deposit_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM deposits WHERE id = $1 FOR UPDATE", deposit_id)
+            if not row or row["status"] != "active":
+                return False
+            await conn.execute("UPDATE deposits SET status = 'withdrawn' WHERE id = $1", deposit_id)
+            return True
+        else:
+            cursor = await conn.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,))
+            row = await cursor.fetchone()
+            if not row or row["status"] != "active":
+                return False
+            await conn.execute("UPDATE deposits SET status = 'withdrawn' WHERE id = ?", (deposit_id,))
+            await conn.commit()
+            return True
     finally:
         if not _is_pg:
             await conn.close()
