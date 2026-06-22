@@ -461,9 +461,8 @@ async def cmd_auto_posts(message: Message):
     elif action == "интервал" and len(args) >= 3:
         try:
             minutes = int(args[2])
-            if minutes < 10:
-                await message.reply("❌ Минимальный интервал — 10 минут")
-                return
+            if minutes < 1:
+                minutes = 1
             await set_config("poster_interval", str(minutes))
             await message.reply(f"✅ Интервал: {minutes} минут")
         except ValueError:
