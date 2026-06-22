@@ -6,6 +6,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from config import BOT_TOKEN, BOT_PROXY
 from database import init_db
@@ -42,6 +43,24 @@ async def main():
     bot = Bot(**kwargs)
     dp = Dispatcher()
     dp.include_router(router)
+
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Помощь и список команд"),
+        BotCommand(command="баланс", description="Проверить баланс"),
+        BotCommand(command="перевести", description="Перевести деньги пользователю"),
+        BotCommand(command="история", description="История операций"),
+        BotCommand(command="запросить_кредит", description="Запросить кредит"),
+        BotCommand(command="запросить_вклад", description="Запросить вклад"),
+        BotCommand(command="начислить", description="[Админ] Начислить деньги"),
+        BotCommand(command="списать", description="[Админ] Списать деньги"),
+        BotCommand(command="установить_баланс", description="[Админ] Установить баланс"),
+        BotCommand(command="одобрить_кредит", description="[Админ] Одобрить кредит"),
+        BotCommand(command="отклонить_кредит", description="[Админ] Отклонить кредит"),
+        BotCommand(command="одобрить_вклад", description="[Админ] Одобрить вклад"),
+        BotCommand(command="отклонить_вклад", description="[Админ] Отклонить вклад"),
+        BotCommand(command="заявки", description="[Админ] Список заявок"),
+    ])
+    logger.info("Команды зарегистрированы")
 
     await run_web_server()
 
