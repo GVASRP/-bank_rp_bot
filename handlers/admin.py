@@ -415,14 +415,18 @@ async def cmd_auto_posts(message: Message):
         enabled = await get_config(f"poster_enabled:{chat_id}")
         interval = await get_config(f"poster_interval:{chat_id}") or "120"
         status = "✅ Включены" if enabled == "1" else "❌ Выключены"
+        channel_raw = await get_config(f"poster_channel:{chat_id}")
+        channel_info = f"Канал: {channel_raw}" if channel_raw else "Канал: этот чат"
         await message.reply(
             f"📢 <b>Авто-объявления</b>\n"
             f"Статус: {status}\n"
-            f"Интервал: {interval} мин\n\n"
+            f"Интервал: {interval} мин\n"
+            f"{channel_info}\n\n"
             f"Команды:\n"
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
             f"<code>!объявления интервал 1</code> — интервал в минутах\n"
+            f"<code>!объявления канал ID</code> — куда постить (ID чата)\n"
             f"<code>!объявления тест</code> — показать 1 объявление\n\n"
             f"🚗 Реальные авто из Висконсина с фото (Wikipedia)",
             parse_mode="HTML",
@@ -431,7 +435,15 @@ async def cmd_auto_posts(message: Message):
 
     action = args[1]
 
-    if action == "вкл":
+    if action == "канал" and len(args) >= 3:
+        target_raw = args[2]
+        try:
+            target_id = int(target_raw.lstrip("@"))
+            await set_config(f"poster_channel:{chat_id}", str(target_id))
+            await message.reply(f"📢 Объявления будут поститься в чат {target_id}")
+        except ValueError:
+            await message.reply("❌ Укажите числовой ID чата (можно получить через @getmyid_bot)")
+    elif action == "вкл":
         await set_config(f"poster_enabled:{chat_id}", "1")
         chats = await get_config("poster_chats") or ""
         if str(chat_id) not in chats.split(","):

@@ -180,10 +180,12 @@ async def auto_poster_loop(bot):
                 continue
             interval_raw = await get_config(f"poster_interval:{chat_id}")
             interval = int(interval_raw or "120")
+            target_raw = await get_config(f"poster_channel:{chat_id}")
+            target = int(target_raw) if target_raw else chat_id
             now = asyncio.get_event_loop().time()
             last = last_post.get(chat_id, 0.0)
             if now - last >= interval * 60:
-                await post_new_car(bot, chat_id)
+                await post_new_car(bot, target)
                 last_post[chat_id] = now
 
         await asyncio.sleep(TICK)
