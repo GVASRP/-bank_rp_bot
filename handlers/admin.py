@@ -470,8 +470,7 @@ async def cmd_auto_posts(message: Message):
         except ValueError:
             await message.reply("❌ Укажите число минут")
     elif action == "тест":
-        city = await get_config("poster_city") or "newyork"
-        result = await force_post_one(message.bot, message.chat.id, city)
+        result = await force_post_one(message.bot, message.chat.id)
         await message.reply(result, parse_mode="HTML")
     else:
         await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, город, интервал, тест")
