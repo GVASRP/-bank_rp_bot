@@ -598,6 +598,42 @@ async def withdraw_deposit(deposit_id: int) -> bool:
             await conn.close()
 
 
+async def get_all_credits(status: str = "active") -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM credits WHERE status = $1 ORDER BY created_at DESC", status,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM credits WHERE status = ? ORDER BY created_at DESC", (status,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
+async def get_all_deposits(status: str = "active") -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM deposits WHERE status = $1 ORDER BY created_at DESC", status,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM deposits WHERE status = ? ORDER BY created_at DESC", (status,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        if not _is_pg:
+            await conn.close()
+
+
 async def get_all_users_ranked() -> list:
     conn = await get_conn()
     try:

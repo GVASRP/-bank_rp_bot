@@ -12,9 +12,11 @@ from database import (
     update_credit_request,
     get_credit_requests,
     create_credit,
+    get_all_credits,
     get_deposit_request,
     update_deposit_request,
     get_deposit_requests,
+    get_all_deposits,
     create_deposit_account,
 )
 from utils import format_amount, parse_amount, is_admin, get_user_mention, resolve_target
@@ -327,5 +329,53 @@ async def cmd_list_requests(message: Message):
             user = await get_user_by_telegram_id(d["user_telegram_id"])
             name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
             lines.append(f"  #{d['id']} — {name}: {format_amount(d['amount'])} долларов")
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("все_кредиты", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_all_credits(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    credits = await get_all_credits("active")
+    if not credits:
+        await message.reply("📭 Нет активных кредитов")
+        return
+
+    lines = ["💳 <b>Все активные кредиты:</b>\n"]
+    for c in credits:
+        user = await get_user_by_telegram_id(c["user_telegram_id"])
+        name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
+        paid = c["amount"] - c["remaining"]
+        lines.append(
+            f"#{c['id']} — {name}\n"
+            f"   Выдано: {format_amount(c['amount'])} | Погашено: {format_amount(paid)}\n"
+            f"   Остаток: <b>{format_amount(c['remaining'])}</b> долларов"
+        )
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("все_вклады", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_all_deposits(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    deposits = await get_all_deposits("active")
+    if not deposits:
+        await message.reply("📭 Нет активных вкладов")
+        return
+
+    lines = ["🏛 <b>Все активные вклады:</b>\n"]
+    for d in deposits:
+        user = await get_user_by_telegram_id(d["user_telegram_id"])
+        name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
+        payout = d["amount"] + (d["amount"] * d["interest_rate"] // 100)
+        lines.append(
+            f"#{d['id']} — {name}\n"
+            f"   Сумма: {format_amount(d['amount'])} | %: {d['interest_rate']}%\n"
+            f"   К выплате: <b>{format_amount(payout)}</b> долларов"
+        )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
