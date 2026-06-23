@@ -256,32 +256,52 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
 async def auto_poster_loop(bot):
     logger.info("Auto-poster started")
     TICK = 15
+    errors = 0
 
     while True:
-        all_config = await get_config("poster_chats") or ""
-        chat_ids = [c for c in all_config.split(",") if c]
+        try:
+            all_config = await get_config("poster_chats") or ""
+            chat_ids = [c for c in all_config.split(",") if c]
+            logger.debug("Poster check: %s chats configured", len(chat_ids))
 
-        for cid_str in chat_ids:
-            chat_id = int(cid_str)
-            enabled = await get_config(f"poster_enabled:{chat_id}")
-            if enabled != "1":
-                continue
+            for cid_str in chat_ids:
+                chat_id = int(cid_str)
+                enabled = await get_config(f"poster_enabled:{chat_id}")
+                if enabled != "1":
+                    continue
 
-            interval_raw = await get_config(f"poster_interval:{chat_id}")
-            interval_min = int(interval_raw) if interval_raw and interval_raw.isdigit() else 120
-            target_raw = await get_config(f"poster_cars_channel:{chat_id}")
-            target = int(target_raw) if target_raw else chat_id
-            topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
-            topic = int(topic_raw) if topic_raw else None
+                interval_raw = await get_config(f"poster_interval:{chat_id}")
+                interval_min = int(interval_raw) if interval_raw and interval_raw.isdigit() else 120
+                target_raw = await get_config(f"poster_cars_channel:{chat_id}")
+                target = int(target_raw) if target_raw else chat_id
+                topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+                topic = int(topic_raw) if topic_raw else None
 
-            last_key = f"poster_last_post:{chat_id}"
-            last_raw = await get_config(last_key)
-            last_ts = float(last_raw) if last_raw else 0.0
-            now = time.time()
+                last_key = f"poster_last_post:{chat_id}"
+                last_raw = await get_config(last_key)
+                last_ts = float(last_raw) if last_raw else 0.0
+                now = time.time()
+                elapsed = now - last_ts
+                needed = interval_min * 60
 
-            if now - last_ts >= interval_min * 60:
-                logger.info("Posting car for chat %s (interval=%s min, last=%s)", chat_id, interval_min, last_ts)
-                await post_new_car(bot, target, topic)
-                await set_config(last_key, str(now))
+                logger.debug("Chat %s: enabled, interval=%s min, elapsed=%.0f/%.0f sec",
+                             chat_id, interval_min, elapsed, needed)
+
+                if elapsed >= needed:
+                    logger.info("Posting car for chat %s (interval=%s min, elapsed=%.0f sec)",
+                                chat_id, interval_min, elapsed)
+                    ok = await post_new_car(bot, target, topic)
+                    if ok:
+                        await set_config(last_key, str(now))
+                        errors = 0
+                    else:
+                        logger.warning("Post failed for chat %s, will retry", chat_id)
+        except Exception as e:
+            logger.error("Auto-poster loop error: %s", e, exc_info=True)
+            errors += 1
+            if errors > 10:
+                logger.critical("Too many poster errors, sleeping 5 min")
+                await asyncio.sleep(300)
+                errors = 0
 
         await asyncio.sleep(TICK)

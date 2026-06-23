@@ -425,11 +425,14 @@ async def cmd_auto_posts(message: Message):
         channel_info = f"🚗 Канал: {channel_raw}" if channel_raw else "🚗 Канал: этот чат"
         if topic_raw:
             channel_info += f" (топик {topic_raw})"
+        last_key = f"poster_last_post:{chat_id}"
+        last_raw = await get_config(last_key)
+        last_info = f", последний пост: {last_raw}" if last_raw else ", постов не было"
         await message.reply(
             f"📢 <b>Авто-объявления</b>\n"
             f"Статус: {status}\n"
             f"Интервал: {interval} мин\n"
-            f"{channel_info}\n\n"
+            f"{channel_info}{last_info}\n\n"
             f"Команды:\n"
             f"<code>!объявления вкл</code> — включить\n"
             f"<code>!объявления выкл</code> — выключить\n"
