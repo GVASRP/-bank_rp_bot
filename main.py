@@ -15,6 +15,8 @@ from auto_poster import auto_poster_loop
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+_poster_task = None
+
 
 async def health_check(request):
     return web.Response(text="OK")
@@ -45,7 +47,8 @@ async def main():
     dp.include_router(router)
 
     await run_web_server()
-    asyncio.create_task(auto_poster_loop(bot))
+    global _poster_task
+    _poster_task = asyncio.create_task(auto_poster_loop(bot))
 
     logger.info("Бот запущен!")
     try:
