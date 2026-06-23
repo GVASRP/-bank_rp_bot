@@ -216,6 +216,12 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
         return True
     except Exception as e:
         logger.error("Send error: %s", e)
+        if "chat not found" in str(e).lower():
+            logger.warning("Chat %s not found — disabling poster for this chat", chat_id)
+            try:
+                await set_config(f"poster_enabled:{chat_id}", "0")
+            except Exception:
+                pass
         return False
 
 
@@ -296,11 +302,12 @@ async def auto_poster_loop(bot):
                     logger.info("Posting car for chat %s (interval=%s min, elapsed=%.0f sec)",
                                 chat_id, interval_min, elapsed)
                     ok = await post_new_car(bot, target, topic)
+                    # always update timestamp to prevent spam loop on errors
+                    await set_config(last_key, str(now))
                     if ok:
-                        await set_config(last_key, str(now))
                         errors = 0
                     else:
-                        logger.warning("Post failed for chat %s, will retry", chat_id)
+                        logger.warning("Post failed for chat %s, will retry later", chat_id)
         except Exception as e:
             logger.error("Auto-poster loop error: %s", e, exc_info=True)
             errors += 1
