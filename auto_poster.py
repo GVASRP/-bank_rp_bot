@@ -3,9 +3,14 @@ import logging
 import random
 import time
 
+import aiohttp
+
 from database import is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle
 
 logger = logging.getLogger(__name__)
+
+WIKI_SEARCH = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=3"
+WIKI_IMAGE = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles=%s&format=json&pithumbsize=600"
 
 COLORS = [
     "Белый", "Чёрный", "Серебристый", "Серый", "Синий", "Красный",
@@ -67,6 +72,10 @@ FEATURES = ["климат-контроль", "подогрев сидений", 
 TITLES = ["чистый", "в наличии", "срочно", "торг уместен", "обмен не интересует"]
 
 DAMAGED_TITLES = ["битый", "нерабочий", "на запчасти", "срочно", "в ремонт"]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
 
 RARITY_WEIGHTS = {"common": 80, "damaged": 8, "rare": 9, "legendary": 3}
 RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.3, "rare": 2.5, "legendary": 8.0}
@@ -136,16 +145,47 @@ def generate_car() -> dict:
     }
 
 
+async def fetch_car_image(make: str, model: str) -> bytes | None:
+    try:
+        full = f"{make} {model}".replace("  ", " ")
+        search_url = WIKI_SEARCH % full
+        async with aiohttp.ClientSession() as s:
+            async with s.get(search_url, headers=HEADERS, timeout=8) as r:
+                if r.status != 200:
+                    return None
+                data = await r.json()
+        pages = data.get("query", {}).get("search", [])
+        if not pages:
+            return None
+        title = pages[0]["title"]
+        img_url = WIKI_IMAGE % title.replace(" ", "_").replace("-", "_")
+        async with aiohttp.ClientSession() as s:
+            async with s.get(img_url, headers=HEADERS, timeout=8) as r:
+                if r.status != 200:
+                    return None
+                data2 = await r.json()
+        for pid, info in data2.get("query", {}).get("pages", {}).items():
+            thumb = info.get("thumbnail", {}).get("source")
+            if thumb:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(thumb, headers=HEADERS, timeout=10) as r:
+                        if r.status == 200:
+                            return await r.read()
+    except Exception as e:
+        logger.warning("Image fetch failed for %s %s: %s", make, model, e)
+    return None
+
 
 def format_caption(car: dict, vehicle_id: int) -> str:
     rarity_prefix = RARITY_NAMES[car["rarity"]]
     rarity_line = f"\n{rarity_prefix}" if rarity_prefix else ""
+    disclaimer = "\n📸 Фото для примера (Wikipedia)" if rarity != "damaged" else ""
     return (
         f"🚗 <b>{car['year']} {car['make']} {car['model']}</b>\n"
         f"📍 {car['city']}, WI\n"
         f"💰 ${car['price']:,} | {car['miles']:,} миль\n"
         f"🎨 {car['color']}\n"
-        f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}\n"
+        f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}{disclaimer}\n"
         f"📝 {car['description']}"
     )
 
@@ -160,12 +200,18 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
         car["color"], car["rarity"],
     )
     caption = format_caption(car, vehicle_id)
+    image = await fetch_car_image(car["make"], car["model"])
 
     try:
-        send_args = {"chat_id": chat_id, "parse_mode": "HTML", "text": caption}
+        send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-        await bot.send_message(**send_args)
+        if image:
+            from aiogram.types import BufferedInputFile
+            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+            await bot.send_photo(**send_args, caption=caption)
+        else:
+            await bot.send_message(**send_args, text=caption)
 
         await mark_listing_posted(car["guid"])
         return True
@@ -196,11 +242,17 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
         car["color"], car["rarity"],
     )
     caption = format_caption(car, vehicle_id)
+    image = await fetch_car_image(car["make"], car["model"])
     try:
-        send_args = {"chat_id": chat_id, "parse_mode": "HTML", "text": caption}
+        send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-        await bot.send_message(**send_args)
+        if image:
+            from aiogram.types import BufferedInputFile
+            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+            await bot.send_photo(**send_args, caption=caption)
+        else:
+            await bot.send_message(**send_args, text=caption)
         await mark_listing_posted(car["guid"])
         badge = RARITY_NAMES[car["rarity"]]
         return f"✅ #{vehicle_id} {car['year']} {car['make']} {car['model']} — {car['city']} {badge}"
