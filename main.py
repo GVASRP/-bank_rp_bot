@@ -15,8 +15,6 @@ from auto_poster import auto_poster_loop
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-_poster_task = None
-
 
 async def health_check(request):
     return web.Response(text="OK")
@@ -34,6 +32,11 @@ async def run_web_server():
     logger.info("Веб-сервер для хелс-чеков запущен на порту %d", port)
 
 
+async def on_startup(bot):
+    logger.info("Auto-poster: creating background task")
+    asyncio.create_task(auto_poster_loop(bot))
+
+
 async def main():
     logger.info("Инициализация базы данных...")
     await init_db()
@@ -45,10 +48,9 @@ async def main():
     bot = Bot(**kwargs)
     dp = Dispatcher()
     dp.include_router(router)
+    dp.startup.register(on_startup)
 
     await run_web_server()
-    global _poster_task
-    _poster_task = asyncio.create_task(auto_poster_loop(bot))
 
     logger.info("Бот запущен!")
     try:

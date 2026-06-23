@@ -254,12 +254,17 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
 
 
 async def auto_poster_loop(bot):
-    logger.info("Auto-poster started")
+    logger.info("Auto-poster loop started (bot=%s)", type(bot).__name__)
     TICK = 15
     errors = 0
+    counter = 0
 
     while True:
         try:
+            counter += 1
+            if counter % 40 == 0:
+                logger.info("Auto-poster heartbeat (tick %s)", counter)
+
             all_config = await get_config("poster_chats") or ""
             chat_ids = [c for c in all_config.split(",") if c]
             logger.debug("Poster check: %s chats configured", len(chat_ids))
