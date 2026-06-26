@@ -27,6 +27,7 @@ async def cmd_balance(message: Message):
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
+        message.chat.id,
     )
     await message.reply(f"💰 Ваш баланс: <b>{format_amount(user['balance'])}</b> долларов", parse_mode="HTML")
 
@@ -60,6 +61,7 @@ async def cmd_transfer(message: Message):
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
+        message.chat.id,
     )
     if sender["balance"] < amount:
         await message.reply(
@@ -68,8 +70,9 @@ async def cmd_transfer(message: Message):
         )
         return
 
-    await update_balance(message.from_user.id, -amount)
-    await update_balance(target_id, amount)
+    await update_balance(message.from_user.id, -amount, message.chat.id)
+    await get_or_create_user(target_id, chat_id=message.chat.id)
+    await update_balance(target_id, amount, message.chat.id)
     await add_transaction(
         "transfer",
         message.from_user.id,
@@ -90,6 +93,7 @@ async def cmd_history(message: Message):
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
+        message.chat.id,
     )
     transactions = await get_transactions(message.from_user.id, limit=15)
     if not transactions:
@@ -117,7 +121,7 @@ async def cmd_history(message: Message):
 
 @router.message(Command("рейтинг", prefix="!/"))
 async def cmd_ranking(message: Message):
-    users = await get_all_users_ranked()
+    users = await get_all_users_ranked(chat_id=message.chat.id)
     if not users:
         await message.reply("📭 Пока нет зарегистрированных пользователей")
         return
@@ -169,6 +173,7 @@ async def cmd_request_deposit(message: Message):
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
+        message.chat.id,
     )
     if user["balance"] < amount:
         await message.reply(
@@ -239,6 +244,7 @@ async def cmd_repay_credit(message: Message):
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
+        message.chat.id,
     )
 
     debt_info = calc_credit_debt(credit)
@@ -255,7 +261,7 @@ async def cmd_repay_credit(message: Message):
         return
 
     interest_before = debt_info["interest_due"]
-    await update_balance(message.from_user.id, -amount)
+    await update_balance(message.from_user.id, -amount, message.chat.id)
     await repay_credit(credit_id, amount)
     await add_transaction("repay", message.from_user.id, None, amount, f"Погашение кредита #{credit_id}")
 
@@ -323,7 +329,7 @@ async def cmd_withdraw_deposit(message: Message):
 
     payout, interest = calc_deposit_payout(deposit)
     await withdraw_deposit(deposit_id)
-    await update_balance(message.from_user.id, payout)
+    await update_balance(message.from_user.id, payout, message.chat.id)
     await add_transaction("withdraw", None, message.from_user.id, payout, f"Вывод вклада #{deposit_id} (начислено %: {interest})")
 
     await message.reply(

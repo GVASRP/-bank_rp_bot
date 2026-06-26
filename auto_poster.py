@@ -179,7 +179,7 @@ async def fetch_car_image(make: str, model: str) -> bytes | None:
 def format_caption(car: dict, vehicle_id: int) -> str:
     rarity_prefix = RARITY_NAMES[car["rarity"]]
     rarity_line = f"\n{rarity_prefix}" if rarity_prefix else ""
-    disclaimer = "\n📸 Фото для примера (Wikipedia)" if rarity != "damaged" else ""
+    disclaimer = "\n📸 Фото для примера (Wikipedia)" if car["rarity"] != "damaged" else ""
     return (
         f"🚗 <b>{car['year']} {car['make']} {car['model']}</b>\n"
         f"📍 {car['city']}, WI\n"

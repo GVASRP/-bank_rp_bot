@@ -97,6 +97,16 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col} TEXT DEFAULT {default}")
             except Exception:
                 pass
+        for col in (("chat_id", 0),):
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN {col[0]} BIGINT DEFAULT {col[1]}")
+            except Exception:
+                pass
+        try:
+            await conn.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_telegram_id_key")
+            await conn.execute("ALTER TABLE users ADD UNIQUE (telegram_id, chat_id)")
+        except Exception:
+            pass
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS posted_listings (
                 guid TEXT PRIMARY KEY,
@@ -159,10 +169,11 @@ async def init_db():
             await conn.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER UNIQUE NOT NULL,
+                    telegram_id INTEGER NOT NULL,
                     username TEXT,
                     first_name TEXT,
-                    balance INTEGER DEFAULT 0
+                    balance INTEGER DEFAULT 0,
+                    chat_id INTEGER DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS transactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -246,45 +257,75 @@ async def init_db():
                 );
             """)
             await conn.commit()
+            # Migration: add chat_id column if missing
+            try:
+                await conn.execute("ALTER TABLE users ADD COLUMN chat_id INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            # Remove old UNIQUE constraint on telegram_id by recreating table
+            cursor = await conn.execute("SELECT COUNT(*) FROM pragma_index_list('users') WHERE name LIKE 'sqlite_autoindex%'")
+            row = await cursor.fetchone()
+            if row and row[0] > 0:
+                await conn.executescript("""
+                    CREATE TABLE users_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL,
+                        username TEXT,
+                        first_name TEXT,
+                        balance INTEGER DEFAULT 0,
+                        chat_id INTEGER DEFAULT 0
+                    );
+                    INSERT INTO users_new (id, telegram_id, username, first_name, balance, chat_id)
+                        SELECT id, telegram_id, username, first_name, balance, COALESCE(chat_id, 0) FROM users;
+                    DROP TABLE users;
+                    ALTER TABLE users_new RENAME TO users;
+                """)
+                await conn.commit()
+            # Create unique index for per-group users
+            try:
+                await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_chat ON users(telegram_id, chat_id)")
+                await conn.commit()
+            except Exception:
+                pass
         finally:
             await conn.close()
 
 
-async def get_or_create_user(telegram_id: int, username: Optional[str] = None, first_name: Optional[str] = None) -> dict:
+async def get_or_create_user(telegram_id: int, username: Optional[str] = None, first_name: Optional[str] = None, chat_id: int = 0) -> dict:
     conn = await get_conn()
     try:
         if _is_pg:
-            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             if not row:
                 row = await conn.fetchrow(
-                    "INSERT INTO users (telegram_id, username, first_name, balance) VALUES ($1, $2, $3, 0) RETURNING *",
-                    telegram_id, username, first_name,
+                    "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES ($1, $2, $3, 0, $4) RETURNING *",
+                    telegram_id, username, first_name, chat_id,
                 )
             elif username or first_name:
                 await conn.execute(
-                    "UPDATE users SET username = COALESCE($1, username), first_name = COALESCE($2, first_name) WHERE telegram_id = $3",
-                    username, first_name, telegram_id,
+                    "UPDATE users SET username = COALESCE($1, username), first_name = COALESCE($2, first_name) WHERE telegram_id = $3 AND chat_id = $4",
+                    username, first_name, telegram_id, chat_id,
                 )
-                row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+                row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             return dict(row)
         else:
-            cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+            cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
             user = await cursor.fetchone()
             if not user:
                 await conn.execute(
-                    "INSERT INTO users (telegram_id, username, first_name, balance) VALUES (?, ?, ?, 0)",
-                    (telegram_id, username, first_name),
+                    "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES (?, ?, ?, 0, ?)",
+                    (telegram_id, username, first_name, chat_id),
                 )
                 await conn.commit()
-                cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+                cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
                 user = await cursor.fetchone()
             elif (username and user["username"] != username) or (first_name and user["first_name"] != first_name):
                 await conn.execute(
-                    "UPDATE users SET username = ?, first_name = ? WHERE telegram_id = ?",
-                    (username or user["username"], first_name or user["first_name"], telegram_id),
+                    "UPDATE users SET username = ?, first_name = ? WHERE telegram_id = ? AND chat_id = ?",
+                    (username or user["username"], first_name or user["first_name"], telegram_id, chat_id),
                 )
                 await conn.commit()
-                cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+                cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
                 user = await cursor.fetchone()
             return dict(user)
     finally:
@@ -292,14 +333,14 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
             await conn.close()
 
 
-async def get_user_by_telegram_id(telegram_id: int) -> Optional[dict]:
+async def get_user_by_telegram_id(telegram_id: int, chat_id: int = 0) -> Optional[dict]:
     conn = await get_conn()
     try:
         if _is_pg:
-            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             return dict(row) if row else None
         else:
-            cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+            cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
@@ -322,40 +363,40 @@ async def get_user_by_username(username: str) -> Optional[dict]:
             await conn.close()
 
 
-async def update_balance(telegram_id: int, amount: int) -> None:
+async def update_balance(telegram_id: int, amount: int, chat_id: int = 0) -> None:
     conn = await get_conn()
     try:
         if _is_pg:
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE telegram_id = $2", amount, telegram_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 AND chat_id = $3", amount, telegram_id, chat_id)
         else:
-            await conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (amount, telegram_id))
+            await conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ? AND chat_id = ?", (amount, telegram_id, chat_id))
             await conn.commit()
     finally:
         if not _is_pg:
             await conn.close()
 
 
-async def set_balance(telegram_id: int, amount: int) -> None:
+async def set_balance(telegram_id: int, amount: int, chat_id: int = 0) -> None:
     conn = await get_conn()
     try:
         if _is_pg:
-            await conn.execute("UPDATE users SET balance = $1 WHERE telegram_id = $2", amount, telegram_id)
+            await conn.execute("UPDATE users SET balance = $1 WHERE telegram_id = $2 AND chat_id = $3", amount, telegram_id, chat_id)
         else:
-            await conn.execute("UPDATE users SET balance = ? WHERE telegram_id = ?", (amount, telegram_id))
+            await conn.execute("UPDATE users SET balance = ? WHERE telegram_id = ? AND chat_id = ?", (amount, telegram_id, chat_id))
             await conn.commit()
     finally:
         if not _is_pg:
             await conn.close()
 
 
-async def get_balance(telegram_id: int) -> int:
+async def get_balance(telegram_id: int, chat_id: int = 0) -> int:
     conn = await get_conn()
     try:
         if _is_pg:
-            row = await conn.fetchrow("SELECT balance FROM users WHERE telegram_id = $1", telegram_id)
+            row = await conn.fetchrow("SELECT balance FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             return row["balance"] if row else 0
         else:
-            cursor = await conn.execute("SELECT balance FROM users WHERE telegram_id = ?", (telegram_id,))
+            cursor = await conn.execute("SELECT balance FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
             row = await cursor.fetchone()
             return row["balance"] if row else 0
     finally:
@@ -1165,13 +1206,19 @@ async def delete_house(house_id: int) -> bool:
             await conn.close()
 
 
-async def get_all_users_ranked() -> list:
+async def get_all_users_ranked(chat_id: int | None = None) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM users ORDER BY balance DESC")
+            if chat_id is not None:
+                rows = await conn.fetch("SELECT * FROM users WHERE chat_id = $1 ORDER BY balance DESC", chat_id)
+            else:
+                rows = await conn.fetch("SELECT * FROM users ORDER BY balance DESC")
         else:
-            cursor = await conn.execute("SELECT * FROM users ORDER BY balance DESC")
+            if chat_id is not None:
+                cursor = await conn.execute("SELECT * FROM users WHERE chat_id = ? ORDER BY balance DESC", (chat_id,))
+            else:
+                cursor = await conn.execute("SELECT * FROM users ORDER BY balance DESC")
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:

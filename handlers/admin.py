@@ -65,8 +65,8 @@ async def cmd_add_balance(message: Message):
         await message.reply(hint or "❌ Пользователь не найден")
         return
 
-    await get_or_create_user(target_id)
-    await update_balance(target_id, amount)
+    await get_or_create_user(target_id, chat_id=message.chat.id)
+    await update_balance(target_id, amount, message.chat.id)
     await add_transaction("admin_add", None, target_id, amount, f"Начислено админом {message.from_user.full_name}")
 
     await message.reply(
@@ -95,7 +95,7 @@ async def cmd_remove_balance(message: Message):
         await message.reply(hint or "❌ Пользователь не найден")
         return
 
-    user = await get_or_create_user(target_id)
+    user = await get_or_create_user(target_id, chat_id=message.chat.id)
     if user["balance"] < amount:
         await message.reply(
             f"❌ У пользователя недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> долларов",
@@ -103,7 +103,7 @@ async def cmd_remove_balance(message: Message):
         )
         return
 
-    await update_balance(target_id, -amount)
+    await update_balance(target_id, -amount, message.chat.id)
     await add_transaction("admin_remove", None, target_id, amount, f"Списано админом {message.from_user.full_name}")
 
     await message.reply(
@@ -132,9 +132,9 @@ async def cmd_set_balance(message: Message):
         await message.reply(hint or "❌ Пользователь не найден")
         return
 
-    await get_or_create_user(target_id)
-    old_balance = (await get_user_by_telegram_id(target_id))["balance"]
-    await set_balance(target_id, amount)
+    await get_or_create_user(target_id, chat_id=message.chat.id)
+    old_balance = (await get_user_by_telegram_id(target_id, message.chat.id))["balance"]
+    await set_balance(target_id, amount, message.chat.id)
     await add_transaction("admin_set", None, target_id, amount, f"Баланс установлен админом {message.from_user.full_name} (было {old_balance})")
 
     await message.reply(
@@ -191,7 +191,7 @@ async def cmd_approve_credit(message: Message):
 
     try:
         credit_id = await create_credit(request["user_telegram_id"], request["amount"], interest, duration_days)
-        await update_balance(request["user_telegram_id"], request["amount"])
+        await update_balance(request["user_telegram_id"], request["amount"], message.chat.id)
         await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%, {duration_days}д)")
         await update_credit_request(request_id, "approved")
     except Exception as e:
@@ -273,7 +273,7 @@ async def cmd_approve_deposit(message: Message):
         await message.reply(f"❌ Заявка #{request_id} уже обработана (статус: {request['status']})")
         return
 
-    user = await get_user_by_telegram_id(request["user_telegram_id"])
+    user = await get_user_by_telegram_id(request["user_telegram_id"], message.chat.id)
     if not user or user["balance"] < request["amount"]:
         await update_deposit_request(request_id, "rejected")
         await message.reply(
@@ -284,7 +284,7 @@ async def cmd_approve_deposit(message: Message):
 
     await update_deposit_request(request_id, "approved")
     await create_deposit_account(request["user_telegram_id"], request["amount"], interest)
-    await update_balance(request["user_telegram_id"], -request["amount"])
+    await update_balance(request["user_telegram_id"], -request["amount"], message.chat.id)
     await add_transaction("deposit", request["user_telegram_id"], None, request["amount"], f"Вклад #{request_id} одобрен админом {message.from_user.full_name} ({interest}%)")
 
     await message.reply(
@@ -344,7 +344,7 @@ async def cmd_list_requests(message: Message):
     if credits:
         lines.append("<b>Кредиты:</b>")
         for c in credits:
-            user = await get_user_by_telegram_id(c["user_telegram_id"])
+            user = await get_user_by_telegram_id(c["user_telegram_id"], message.chat.id)
             name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
             lines.append(f"  #{c['id']} — {name}: {format_amount(c['amount'])} долларов")
         lines.append("")
@@ -352,7 +352,7 @@ async def cmd_list_requests(message: Message):
     if deposits:
         lines.append("<b>Вклады:</b>")
         for d in deposits:
-            user = await get_user_by_telegram_id(d["user_telegram_id"])
+            user = await get_user_by_telegram_id(d["user_telegram_id"], message.chat.id)
             name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
             lines.append(f"  #{d['id']} — {name}: {format_amount(d['amount'])} долларов")
 
@@ -371,7 +371,7 @@ async def cmd_all_credits(message: Message):
 
     lines = ["💳 <b>Все активные кредиты:</b>\n"]
     for c in credits:
-        user = await get_user_by_telegram_id(c["user_telegram_id"])
+        user = await get_user_by_telegram_id(c["user_telegram_id"], message.chat.id)
         name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
         info = calc_credit_debt(c)
         lines.append(
@@ -396,7 +396,7 @@ async def cmd_all_deposits(message: Message):
 
     lines = ["🏛 <b>Все активные вклады:</b>\n"]
     for d in deposits:
-        user = await get_user_by_telegram_id(d["user_telegram_id"])
+        user = await get_user_by_telegram_id(d["user_telegram_id"], message.chat.id)
         name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
         payout, interest = calc_deposit_payout(d)
         lines.append(
@@ -585,12 +585,12 @@ async def cmd_delete_house(message: Message):
 async def cmd_user_cars(message: Message):
     if not await ensure_admin(message):
         return
-    args = message.text.split(maxsplit=1)
+    args = message.text.split(maxsplit=2)
     if len(args) < 2:
         await message.reply("❌ Использование: <code>!авто_пользователя @user</code>", parse_mode="HTML")
         return
-    uid = await resolve_target(args[1])
-    if not uid:
+    uid, _, _ = await resolve_target(message, args)
+    if uid is None:
         await message.reply("❌ Пользователь не найден")
         return
     vehicles = await get_all_vehicles_by_owner(uid)
@@ -640,8 +640,8 @@ async def cmd_give_car(message: Message):
     if len(parts) < 3:
         await message.reply("❌ Использование: <code>!выдать_авто @user ID</code>", parse_mode="HTML")
         return
-    uid = await resolve_target(parts[1])
-    if not uid:
+    uid, _, _ = await resolve_target(message, parts)
+    if uid is None:
         await message.reply("❌ Пользователь не найден")
         return
     try:

@@ -17,6 +17,7 @@ from database import (
     update_balance,
     add_transaction,
 )
+from auto_poster import post_new_car
 from utils import format_amount, parse_amount
 
 router = Router()
@@ -26,8 +27,12 @@ router = Router()
 async def cmd_vehicles(message: Message):
     vehicles = await get_available_vehicles()
     if not vehicles:
-        await message.reply("📭 Нет доступных автомобилей")
-        return
+        ok = await post_new_car(message.bot, message.chat.id, message.message_thread_id)
+        if ok:
+            vehicles = await get_available_vehicles()
+        if not vehicles:
+            await message.reply("📭 Нет доступных автомобилей")
+            return
     lines = ["🚗 <b>Автомобили в продаже:</b>\n"]
     for v in vehicles:
         lines.append(
@@ -84,7 +89,7 @@ async def cmd_buy_car(message: Message):
         await message.reply(f"❌ Автомобиль #{vid} уже продан")
         return
 
-    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.chat.id)
     if user["balance"] < v["price"]:
         await message.reply(
             f"❌ Недостаточно средств. Нужно: ${v['price']:,}, баланс: {format_amount(user['balance'])}",
@@ -96,7 +101,7 @@ async def cmd_buy_car(message: Message):
         await message.reply(f"❌ Ошибка покупки")
         return
 
-    await update_balance(message.from_user.id, -v["price"])
+    await update_balance(message.from_user.id, -v["price"], message.chat.id)
     await add_transaction("buy_car", message.from_user.id, None, v["price"],
                           f"Покупка авто #{vid} {v['year']} {v['make']} {v['model']}")
 
@@ -149,7 +154,7 @@ async def cmd_sell_car(message: Message):
         await message.reply("❌ Ошибка продажи")
         return
 
-    await update_balance(message.from_user.id, price)
+    await update_balance(message.from_user.id, price, message.chat.id)
     await add_transaction("sell_car", None, message.from_user.id, price,
                           f"Продажа авто #{vid} {v['year']} {v['make']} {v['model']}")
 
@@ -223,7 +228,7 @@ async def cmd_buy_house(message: Message):
         await message.reply(f"❌ Дом #{hid} уже продан")
         return
 
-    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.chat.id)
     if user["balance"] < h["price"]:
         await message.reply(
             f"❌ Недостаточно средств. Нужно: ${h['price']:,}, баланс: {format_amount(user['balance'])}",
@@ -235,7 +240,7 @@ async def cmd_buy_house(message: Message):
         await message.reply(f"❌ Ошибка покупки")
         return
 
-    await update_balance(message.from_user.id, -h["price"])
+    await update_balance(message.from_user.id, -h["price"], message.chat.id)
     await add_transaction("buy_house", message.from_user.id, None, h["price"],
                           f"Покупка дома #{hid} {h['type_name']}")
 
@@ -287,7 +292,7 @@ async def cmd_sell_house(message: Message):
         await message.reply("❌ Ошибка продажи")
         return
 
-    await update_balance(message.from_user.id, price)
+    await update_balance(message.from_user.id, price, message.chat.id)
     await add_transaction("sell_house", None, message.from_user.id, price,
                           f"Продажа дома #{hid} {h['type_name']}")
 
