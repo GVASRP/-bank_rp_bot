@@ -1476,7 +1476,7 @@ async def get_all_users_with_jobs(chat_id: int) -> list:
                 "j.name as job_name, j.salary "
                 "FROM user_jobs uj "
                 "JOIN job_roles j ON j.id = uj.job_id "
-                "JOIN users u ON u.telegram_id = uj.telegram_id "
+                "JOIN users u ON u.telegram_id = uj.telegram_id AND u.chat_id = uj.chat_id "
                 "WHERE uj.chat_id = $1 ORDER BY j.name", chat_id,
             )
         else:
@@ -1485,7 +1485,7 @@ async def get_all_users_with_jobs(chat_id: int) -> list:
                 "j.name as job_name, j.salary "
                 "FROM user_jobs uj "
                 "JOIN job_roles j ON j.id = uj.job_id "
-                "JOIN users u ON u.telegram_id = uj.telegram_id "
+                "JOIN users u ON u.telegram_id = uj.telegram_id AND u.chat_id = uj.chat_id "
                 "WHERE uj.chat_id = ? ORDER BY j.name", (chat_id,),
             )
             rows = await cursor.fetchall()
