@@ -1,6 +1,6 @@
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 
 from database import (
     get_or_create_user,
@@ -15,16 +15,17 @@ from database import (
     unlist_vehicle,
     buy_player_vehicle,
     get_player_listed_vehicles,
+    create_vehicle,
+    update_balance,
+    add_transaction,
     seed_houses,
     get_house,
     get_available_houses,
     get_user_houses,
     buy_house,
     sell_house,
-    update_balance,
-    add_transaction,
 )
-from auto_poster import post_new_car
+from auto_poster import post_new_car, generate_car, fetch_car_image
 from utils import format_amount, parse_amount, get_user_display
 
 router = Router()
@@ -301,6 +302,43 @@ async def cmd_unlist_car(message: Message):
         return
 
     await message.reply(f"✅ {v['year']} {v['make']} {v['model']} снят с продажи", parse_mode="HTML")
+
+
+CONTAINER_PRICE = 25_000
+
+
+@router.message(Command("контейнер", prefix="!/"))
+async def cmd_container(message: Message):
+    if not await update_balance(message.from_user.id, -CONTAINER_PRICE, message.chat.id):
+        user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
+        await message.reply(
+            f"❌ Недостаточно средств. Нужно: ${CONTAINER_PRICE:,}, баланс: {format_amount(user['balance'] if user else 0)}",
+            parse_mode="HTML",
+        )
+        return
+
+    car = generate_car()
+    vehicle_id = await create_vehicle(
+        car["make"], car["model"], car["year"], car["price"],
+        car["miles"], car["city"], car["vin"], car["license_plate"],
+        car["color"], car["rarity"], message.chat.id,
+    )
+    await buy_vehicle(vehicle_id, message.from_user.id)
+    await add_transaction("container", message.from_user.id, None, CONTAINER_PRICE,
+                          f"Контейнер: {car['year']} {car['make']} {car['model']}")
+
+    caption = (
+        f"🎁 <b>Вы открыли контейнер!</b>\n\n"
+        f"🚗 {car['year']} {car['make']} {car['model']}\n"
+        f"💰 Стоимость: ${car['price']:,} | 📍 {car['city']}\n"
+        f"🔑 Номера: {car['license_plate']} | 🆔 VIN: {car['vin']}\n"
+        f"📝 {car['description']}"
+    )
+    image = await fetch_car_image(car["make"], car["model"])
+    if image:
+        await message.reply_photo(BufferedInputFile(image, filename="car.jpg"), caption=caption, parse_mode="HTML")
+    else:
+        await message.reply(caption, parse_mode="HTML")
 
 
 @router.message(Command("дома", prefix="!/"))
