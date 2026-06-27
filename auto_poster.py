@@ -14,6 +14,24 @@ logger = logging.getLogger(__name__)
 WIKI_SEARCH = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=3"
 WIKI_IMAGE = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles=%s&format=json&pithumbsize=600"
 
+REAL_BRAND_VALUE = {
+    "Pagani": 20, "Lamborghini": 14, "Ferrari": 14,
+    "McLaren": 12, "Bentley": 10, "Rolls-Royce": 10,
+    "Maserati": 7, "Aston Martin": 7, "Marlin Motors": 7,
+    "Porsche": 5.5, "Ferdinand": 5.5,
+    "Mercedes-Benz": 4, "Stuttgart": 4,
+    "BMW": 3.5, "BKM": 3.5, "Jaguar": 3.5,
+    "Land Rover": 3.5, "Mauntley": 10, "Lotus": 3.5,
+    "Audi": 3, "Lexus": 3, "Century": 3,
+    "Cadillac": 3, "Leland": 3, "Genesis": 2.5, "Origin": 2.5,
+    "Lincoln": 2.5, "Sentinel": 2.5, "Volvo": 2, "Viking": 2,
+    "MINI": 1.8, "BITSY": 1.8, "MINI Cooper": 1.8,
+    "Saleen": 3.5, "Caline": 3.5,
+    "Shelby": 3, "Bellco": 3, "Alfa Romeo": 2.5, "Romalpha": 2.5,
+    "Renault": 1.5, "Fiat": 1.2, "Abarth": 1.5,
+    "Lancia": 1.5,
+}
+
 BRAND_TO_REAL = {
     "Arrow": "Pontiac", "Avanta": "Fictional", "Bandit": "Ford",
     "Barchetta": "Maserati", "BKM": "BMW", "Brawnson": "GMC",
@@ -408,10 +426,11 @@ def generate_car() -> dict:
         year = random.randint(yr_lo, yr_hi)
         miles = random.randint(5000, 180000)
         base_prices = {2008: 2000, 2009: 2500, 2010: 3000, 2011: 3500, 2012: 4000, 2013: 5000,
-                       2014: 6000, 2015: 8000, 2016: 10000, 2017: 13000, 2018: 16000,
-                       2019: 19000, 2020: 22000, 2021: 26000, 2022: 30000, 2023: 35000,
-                       2024: 40000, 2025: 46000}
-        price = int((base_prices.get(year, 15000) + random.randint(-3000, 6000)) * RARITY_MULTIPLIERS[rarity])
+                        2014: 6000, 2015: 8000, 2016: 10000, 2017: 13000, 2018: 16000,
+                        2019: 19000, 2020: 22000, 2021: 26000, 2022: 30000, 2023: 35000,
+                        2024: 40000, 2025: 46000}
+        brand_mult = REAL_BRAND_VALUE.get(make, 1.0)
+        price = int((base_prices.get(year, 15000) + random.randint(-3000, 6000)) * RARITY_MULTIPLIERS[rarity] * brand_mult)
         price = max(100, price)
         city = random.choice(WI_CITIES_RU)
         color = random.choice(COLORS)
