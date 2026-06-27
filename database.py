@@ -84,7 +84,7 @@ async def init_db():
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
         """)
-        for col, default in (("remaining_principal", 0), ("interest_paid", 0), ("duration_days", 30)):
+        for col, default in (("remaining_principal", 0), ("interest_paid", 0), ("duration_days", 30), ("remaining", 0)):
             try:
                 await conn.execute(f"ALTER TABLE credits ADD COLUMN {col} INTEGER DEFAULT {default}")
             except Exception:
@@ -676,7 +676,7 @@ async def create_credit(user_telegram_id: int, amount: int, interest_rate: int =
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO credits (user_telegram_id, amount, remaining_principal, interest_rate, duration_days) VALUES ($1, $2, $2, $3, $4) RETURNING id",
+                "INSERT INTO credits (user_telegram_id, amount, remaining, remaining_principal, interest_rate, duration_days) VALUES ($1, $2, $2, $2, $3, $4) RETURNING id",
                 user_telegram_id, amount, interest_rate, duration_days,
             )
             return row["id"]
