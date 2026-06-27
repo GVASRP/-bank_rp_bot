@@ -64,15 +64,16 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
             # Verify current Telegram username via API to catch stale DB data
             try:
                 chat = await message.bot.get_chat(user["telegram_id"])
-                if chat.username is not None:
-                    current = chat.username.lower()
-                    db_val = (user.get("username") or "").lower()
-                    if current != db_val:
-                        await get_or_create_user(user["telegram_id"], chat.username, chat.first_name or "", chat_id)
-                        return user["telegram_id"], chat.first_name or username, chat.username, ""
+                chat_username = (chat.username or "").lower()
+                db_username = (user.get("username") or "").lower()
+                if chat_username != db_username:
+                    # Stale username — clear it from DB so next lookup won't find it
+                    await get_or_create_user(user["telegram_id"], "", chat.first_name or "", chat_id)
+                    user = None
             except Exception:
                 pass
-            return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
+            if user:
+                return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
 
     # Fallback: use text_mention entity (authoritative telegram_id)
     if mention_map:
