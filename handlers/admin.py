@@ -29,6 +29,7 @@ from database import (
     clear_available_vehicles,
     reset_all_balances,
     cleanup_orphan_vehicles,
+    apply_start_balance_to_poor,
     get_chat_stats,
     get_all_users_ranked,
 )
@@ -696,6 +697,15 @@ async def cmd_start_balance(message: Message):
         return
     await set_config("start_balance", str(amount))
     await message.reply(f"✅ Стартовый баланс установлен: <b>{format_amount(amount)}</b> долларов",
+                        parse_mode="HTML")
+
+
+@router.message(Command("выдать_стартовый", prefix="!/"))
+async def cmd_give_start(message: Message):
+    if not await ensure_admin(message):
+        return
+    count = await apply_start_balance_to_poor(chat_id=message.chat.id)
+    await message.reply(f"✅ Выдан стартовый баланс <b>{count}</b> пользователям с балансом ≤ 0",
                         parse_mode="HTML")
 
 

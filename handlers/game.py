@@ -97,19 +97,19 @@ async def cmd_buy_car(message: Message):
         await message.reply(f"❌ Автомобиль #{pos} уже продан")
         return
 
-    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.chat.id)
-    if user["balance"] < v["price"]:
+    if not await update_balance(message.from_user.id, -v["price"], message.chat.id):
+        user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
         await message.reply(
-            f"❌ Недостаточно средств. Нужно: ${v['price']:,}, баланс: {format_amount(user['balance'])}",
+            f"❌ Недостаточно средств. Нужно: ${v['price']:,}, баланс: {format_amount(user['balance'] if user else 0)}",
             parse_mode="HTML",
         )
         return
 
     if not await buy_vehicle(v["id"], message.from_user.id):
-        await message.reply(f"❌ Ошибка покупки")
+        await update_balance(message.from_user.id, v["price"], message.chat.id)
+        await message.reply(f"❌ Ошибка покупки, деньги возвращены")
         return
 
-    await update_balance(message.from_user.id, -v["price"], message.chat.id)
     new_bal = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
     await add_transaction("buy_car", message.from_user.id, None, v["price"],
                           f"Покупка авто #{v['id']} {v['year']} {v['make']} {v['model']}")
@@ -243,19 +243,18 @@ async def cmd_buy_house(message: Message):
         await message.reply(f"❌ Дом #{hid} уже продан")
         return
 
-    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.chat.id)
-    if user["balance"] < h["price"]:
+    if not await update_balance(message.from_user.id, -h["price"], message.chat.id):
         await message.reply(
-            f"❌ Недостаточно средств. Нужно: ${h['price']:,}, баланс: {format_amount(user['balance'])}",
+            f"❌ Недостаточно средств. Нужно: ${h['price']:,}",
             parse_mode="HTML",
         )
         return
 
     if not await buy_house(hid, message.from_user.id):
-        await message.reply(f"❌ Ошибка покупки")
+        await update_balance(message.from_user.id, h["price"], message.chat.id)
+        await message.reply(f"❌ Ошибка покупки дома, деньги возвращены")
         return
 
-    await update_balance(message.from_user.id, -h["price"], message.chat.id)
     await add_transaction("buy_house", message.from_user.id, None, h["price"],
                           f"Покупка дома #{hid} {h['type_name']}")
 

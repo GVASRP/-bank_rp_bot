@@ -57,20 +57,13 @@ async def cmd_transfer(message: Message):
         await message.reply("❌ Нельзя перевести деньги самому себе")
         return
 
-    sender = await get_or_create_user(
-        message.from_user.id,
-        message.from_user.username,
-        message.from_user.first_name,
-        message.chat.id,
-    )
-    if sender["balance"] < amount:
+    if not await update_balance(message.from_user.id, -amount, message.chat.id):
         await message.reply(
-            f"❌ Недостаточно средств. Баланс: <b>{format_amount(sender['balance'])}</b> долларов",
+            f"❌ Недостаточно средств",
             parse_mode="HTML",
         )
         return
 
-    await update_balance(message.from_user.id, -amount, message.chat.id)
     await get_or_create_user(target_id, target_username, target_name, chat_id=message.chat.id)
     await update_balance(target_id, amount, message.chat.id)
     await add_transaction(
@@ -240,28 +233,19 @@ async def cmd_repay_credit(message: Message):
         await message.reply("❌ Кредит уже погашен")
         return
 
-    user = await get_or_create_user(
-        message.from_user.id,
-        message.from_user.username,
-        message.from_user.first_name,
-        message.chat.id,
-    )
-
     debt_info = calc_credit_debt(credit)
-    max_payment = min(user["balance"], debt_info["total_debt"])
 
-    if amount > max_payment:
-        amount = max_payment
+    if amount > debt_info["total_debt"]:
+        amount = debt_info["total_debt"]
 
-    if user["balance"] < amount:
+    if not await update_balance(message.from_user.id, -amount, message.chat.id):
         await message.reply(
-            f"❌ Недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> долларов",
+            f"❌ Недостаточно средств",
             parse_mode="HTML",
         )
         return
 
     interest_before = debt_info["interest_due"]
-    await update_balance(message.from_user.id, -amount, message.chat.id)
     await repay_credit(credit_id, amount)
     await add_transaction("repay", message.from_user.id, None, amount, f"Погашение кредита #{credit_id}")
 

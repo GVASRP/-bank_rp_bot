@@ -377,14 +377,22 @@ async def get_user_by_username(username: str) -> Optional[dict]:
         await conn.close()
 
 
-async def update_balance(telegram_id: int, amount: int, chat_id: int = 0) -> None:
+async def update_balance(telegram_id: int, amount: int, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 AND chat_id = $3", amount, telegram_id, chat_id)
+            result = await conn.execute(
+                "UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 AND chat_id = $3 AND balance + $1 >= 0",
+                amount, telegram_id, chat_id,
+            )
+            return "UPDATE 1" in (result or "")  # asyncpg returns "UPDATE N"
         else:
-            await conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ? AND chat_id = ?", (amount, telegram_id, chat_id))
+            cursor = await conn.execute(
+                "UPDATE users SET balance = balance + ? WHERE telegram_id = ? AND chat_id = ? AND balance + ? >= 0",
+                (amount, telegram_id, chat_id, amount),
+            )
             await conn.commit()
+            return cursor.rowcount > 0
     finally:
         await conn.close()
 
@@ -960,6 +968,33 @@ async def cleanup_orphan_vehicles() -> int:
             await conn.commit()
             count = cursor.rowcount
         return count
+    finally:
+        await conn.close()
+
+
+async def apply_start_balance_to_poor(chat_id: int) -> int:
+    conn = await get_conn()
+    try:
+        start_raw = await get_config("start_balance")
+        start_balance = int(start_raw) if start_raw else 1000
+        if _is_pg:
+            result = await conn.execute(
+                "UPDATE users SET balance = $1 WHERE chat_id = $2 AND balance <= 0",
+                start_balance, chat_id,
+            )
+            count = 0
+            if result and "UPDATE" in str(result):
+                parts = str(result).split()
+                if len(parts) >= 2 and parts[-1].isdigit():
+                    count = int(parts[-1])
+            return count
+        else:
+            cursor = await conn.execute(
+                "UPDATE users SET balance = ? WHERE chat_id = ? AND balance <= 0",
+                (start_balance, chat_id),
+            )
+            await conn.commit()
+            return cursor.rowcount
     finally:
         await conn.close()
 
