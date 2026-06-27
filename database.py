@@ -6,6 +6,7 @@ DATABASE_FILE = "bank.db"
 
 _is_pg = DATABASE_URL is not None
 _pg_pool = None
+_start_balance_cache = None
 
 
 async def get_conn():
@@ -299,6 +300,37 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
+            # Migration: user_salary table
+            try:
+                if _is_pg:
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS user_salary (
+                            id SERIAL PRIMARY KEY,
+                            telegram_id BIGINT NOT NULL,
+                            chat_id BIGINT NOT NULL DEFAULT 0,
+                            job_title TEXT NOT NULL DEFAULT '',
+                            salary INTEGER NOT NULL DEFAULT 0,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE(telegram_id, chat_id)
+                        )
+                    """)
+                else:
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS user_salary (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            telegram_id INTEGER NOT NULL,
+                            chat_id INTEGER NOT NULL DEFAULT 0,
+                            job_title TEXT NOT NULL DEFAULT '',
+                            salary INTEGER NOT NULL DEFAULT 0,
+                            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                            UNIQUE(telegram_id, chat_id)
+                        )
+                    """)
+                await conn.commit()
+            except Exception:
+                pass
         finally:
             await conn.close()
 
@@ -309,8 +341,7 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
         if _is_pg:
             row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             if not row:
-                start_raw = await conn.fetchrow("SELECT value FROM config WHERE key = 'start_balance'")
-                start_balance = int(start_raw["value"]) if start_raw else 1000
+                start_balance = await get_start_balance()
                 row = await conn.fetchrow(
                     "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
                     telegram_id, username, first_name, start_balance, chat_id,
@@ -326,9 +357,7 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
             cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
             user = await cursor.fetchone()
             if not user:
-                cursor2 = await conn.execute("SELECT value FROM config WHERE key = 'start_balance'")
-                start_raw = await cursor2.fetchone()
-                start_balance = int(start_raw["value"]) if start_raw else 1000
+                start_balance = await get_start_balance()
                 await conn.execute(
                     "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES (?, ?, ?, ?, ?)",
                     (telegram_id, username, first_name, start_balance, chat_id),
@@ -869,7 +898,20 @@ async def get_config(key: str) -> str | None:
         await conn.close()
 
 
+async def get_start_balance() -> int:
+    global _start_balance_cache
+    if _start_balance_cache is not None:
+        return _start_balance_cache
+    raw = await get_config("start_balance")
+    val = int(raw) if raw else 1000
+    _start_balance_cache = val
+    return val
+
+
 async def set_config(key: str, value: str) -> None:
+    global _start_balance_cache
+    if key == "start_balance":
+        _start_balance_cache = None
     conn = await get_conn()
     try:
         if _is_pg:
@@ -975,8 +1017,7 @@ async def cleanup_orphan_vehicles() -> int:
 async def apply_start_balance_to_poor(chat_id: int) -> int:
     conn = await get_conn()
     try:
-        start_raw = await get_config("start_balance")
-        start_balance = int(start_raw) if start_raw else 1000
+        start_balance = await get_start_balance()
         if _is_pg:
             result = await conn.execute(
                 "UPDATE users SET balance = $1 WHERE chat_id = $2 AND balance <= 0",
@@ -1024,6 +1065,60 @@ async def get_chat_stats(chat_id: int) -> dict:
     finally:
         await conn.close()
 
+
+# ── Salary ────────────────────────────────────────────────
+
+async def set_user_salary(telegram_id: int, chat_id: int, job_title: str, salary: int) -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute(
+                "INSERT INTO user_salary (telegram_id, chat_id, job_title, salary) "
+                "VALUES ($1, $2, $3, $4) "
+                "ON CONFLICT (telegram_id, chat_id) DO UPDATE SET job_title = $3, salary = $4, updated_at = NOW()",
+                telegram_id, chat_id, job_title, salary,
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO user_salary (telegram_id, chat_id, job_title, salary) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(telegram_id, chat_id) DO UPDATE SET job_title = excluded.job_title, salary = excluded.salary, updated_at = datetime('now')",
+                (telegram_id, chat_id, job_title, salary),
+            )
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def get_user_salary(telegram_id: int, chat_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM user_salary WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
+        else:
+            cursor = await conn.execute("SELECT * FROM user_salary WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_all_salaries(chat_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT s.*, COALESCE(u.first_name, '') as first_name, COALESCE(u.username, '') as username FROM user_salary s LEFT JOIN users u ON u.telegram_id = s.telegram_id AND u.chat_id = $1 WHERE s.chat_id = $1 ORDER BY s.salary DESC", chat_id)
+        else:
+            cursor = await conn.execute(
+                "SELECT s.*, COALESCE(u.first_name, '') as first_name, COALESCE(u.username, '') as username FROM user_salary s LEFT JOIN users u ON u.telegram_id = s.telegram_id AND u.chat_id = ? WHERE s.chat_id = ? ORDER BY s.salary DESC",
+                (chat_id, chat_id),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# ── Vehicle ───────────────────────────────────────────────
 
 async def get_vehicle_by_position(chat_id: int, position: int) -> dict | None:
     vehicles = await get_available_vehicles(chat_id=chat_id)
