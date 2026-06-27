@@ -16,7 +16,7 @@ from database import (
     get_deposit_by_id,
     withdraw_deposit,
 )
-from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, resolve_target
+from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, get_user_display, resolve_target
 
 router = Router()
 
@@ -130,7 +130,7 @@ async def cmd_ranking(message: Message):
     medals = ["🥇", "🥈", "🥉"]
     for i, user in enumerate(users, 1):
         prefix = medals[i - 1] if i <= 3 else f"{i}."
-        name = user.get("first_name") or user.get("username") or f"ID {user['telegram_id']}"
+        name = get_user_display(user)
         lines.append(f"{prefix} {name} — <b>{format_amount(user['balance'])}</b> долларов")
 
     await message.reply("\n".join(lines), parse_mode="HTML")

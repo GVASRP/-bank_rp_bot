@@ -97,13 +97,18 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col} TEXT DEFAULT {default}")
             except Exception:
                 pass
-        for col in (("chat_id", 0),):
+        for col in (("chat_id", "BIGINT DEFAULT 0"),):
             try:
-                await conn.execute(f"ALTER TABLE users ADD COLUMN {col[0]} BIGINT DEFAULT {col[1]}")
+                await conn.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
+            except Exception:
+                pass
+        # Remove old UNIQUE on telegram_id, add composite UNIQUE for per-group balances
+        for cname in ["users_telegram_id_key", "uq_users_telegram_id"]:
+            try:
+                await conn.execute(f"ALTER TABLE users DROP CONSTRAINT IF EXISTS {cname}")
             except Exception:
                 pass
         try:
-            await conn.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_telegram_id_key")
             await conn.execute("ALTER TABLE users ADD UNIQUE (telegram_id, chat_id)")
         except Exception:
             pass

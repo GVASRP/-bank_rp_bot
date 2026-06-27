@@ -29,7 +29,7 @@ from database import (
     clear_available_vehicles,
 )
 from auto_poster import force_post_one
-from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, resolve_target
+from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
 
 router = Router()
 
@@ -345,7 +345,7 @@ async def cmd_list_requests(message: Message):
         lines.append("<b>Кредиты:</b>")
         for c in credits:
             user = await get_user_by_telegram_id(c["user_telegram_id"], message.chat.id)
-            name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
+            name = get_user_display(user, f"ID {c['user_telegram_id']}")
             lines.append(f"  #{c['id']} — {name}: {format_amount(c['amount'])} долларов")
         lines.append("")
 
@@ -353,7 +353,7 @@ async def cmd_list_requests(message: Message):
         lines.append("<b>Вклады:</b>")
         for d in deposits:
             user = await get_user_by_telegram_id(d["user_telegram_id"], message.chat.id)
-            name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
+            name = get_user_display(user, f"ID {d['user_telegram_id']}")
             lines.append(f"  #{d['id']} — {name}: {format_amount(d['amount'])} долларов")
 
     await message.reply("\n".join(lines), parse_mode="HTML")
@@ -372,7 +372,7 @@ async def cmd_all_credits(message: Message):
     lines = ["💳 <b>Все активные кредиты:</b>\n"]
     for c in credits:
         user = await get_user_by_telegram_id(c["user_telegram_id"], message.chat.id)
-        name = user.get("first_name") or f"ID {c['user_telegram_id']}" if user else f"ID {c['user_telegram_id']}"
+        name = get_user_display(user, f"ID {c['user_telegram_id']}")
         info = calc_credit_debt(c)
         lines.append(
             f"#{c['id']} — {name}\n"
@@ -397,7 +397,7 @@ async def cmd_all_deposits(message: Message):
     lines = ["🏛 <b>Все активные вклады:</b>\n"]
     for d in deposits:
         user = await get_user_by_telegram_id(d["user_telegram_id"], message.chat.id)
-        name = user.get("first_name") or f"ID {d['user_telegram_id']}" if user else f"ID {d['user_telegram_id']}"
+        name = get_user_display(user, f"ID {d['user_telegram_id']}")
         payout, interest = calc_deposit_payout(d)
         lines.append(
             f"#{d['id']} — {name}\n"

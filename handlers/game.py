@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from database import (
     get_or_create_user,
+    get_user_by_telegram_id,
     get_vehicle,
     get_available_vehicles,
     get_user_vehicles,
@@ -18,7 +19,7 @@ from database import (
     add_transaction,
 )
 from auto_poster import post_new_car
-from utils import format_amount, parse_amount
+from utils import format_amount, parse_amount, get_user_display
 
 router = Router()
 
@@ -57,7 +58,10 @@ async def cmd_vehicle_info(message: Message):
     if not v:
         await message.reply(f"❌ Автомобиль #{vid} не найден")
         return
-    owner = "В продаже" if not v["owner_telegram_id"] else f"Владелец ID {v['owner_telegram_id']}"
+    owner = "В продаже"
+    if v["owner_telegram_id"]:
+        owner_user = await get_user_by_telegram_id(v["owner_telegram_id"])
+        owner = f"Владелец: {get_user_display(owner_user)}"
     await message.reply(
         f"🚗 <b>{v['year']} {v['make']} {v['model']}</b>\n"
         f"📍 {v['city']}, WI\n"
@@ -196,7 +200,10 @@ async def cmd_house_info(message: Message):
     if not h:
         await message.reply(f"❌ Дом #{hid} не найден")
         return
-    owner = "В продаже" if not h["owner_telegram_id"] else f"Владелец ID {h['owner_telegram_id']}"
+    owner = "В продаже"
+    if h["owner_telegram_id"]:
+        owner_user = await get_user_by_telegram_id(h["owner_telegram_id"])
+        owner = f"Владелец: {get_user_display(owner_user)}"
     await message.reply(
         f"🏠 <b>{h['type_name']}</b>\n"
         f"📍 {h['location']}\n"

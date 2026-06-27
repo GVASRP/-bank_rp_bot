@@ -70,6 +70,16 @@ def get_user_mention(user_id: int, first_name: str = "Пользователь")
     return f"<a href='tg://user?id={user_id}'>{first_name}</a>"
 
 
+def get_user_display(user: dict | None, default: str = "Пользователь") -> str:
+    if not user:
+        return default
+    username = user.get("username")
+    first_name = user.get("first_name")
+    if username:
+        return f"@{username}"
+    return first_name or default
+
+
 def calc_deposit_payout(deposit: dict) -> tuple:
     try:
         created = datetime.strptime(deposit["created_at"], "%Y-%m-%d %H:%M:%S")
