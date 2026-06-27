@@ -52,14 +52,14 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
                 mention_text = message.text[entity.offset:entity.offset + entity.length]
                 username = mention_text.lstrip("@")
                 user = await get_user_by_username(username, chat_id)
-                if user:
+                if user and (user.get("username") or "").lower() == username.lower():
                     return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
 
     username = ""
     if len(args) > 1:
         username = args[1].lstrip("@")
         user = await get_user_by_username(username, chat_id)
-        if user:
+        if user and (user.get("username") or "").lower() == username.lower():
             return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
 
     hint = ""
