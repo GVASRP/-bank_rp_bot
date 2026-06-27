@@ -75,7 +75,7 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
                     user = None
             except Exception as e:
                 logger.warning(f"resolve_target: get_chat failed for uid {user['telegram_id']}: {e}")
-                # Can't verify username — don't trust stale DB data
+                # Can't verify — don't return this user (fallback won't re-process same username)
                 user = None
             if user:
                 return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
@@ -91,6 +91,8 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
             if entity.type == "mention":
                 mention_text = message.text[entity.offset:entity.offset + entity.length]
                 entity_username = mention_text.lstrip("@")
+                if entity_username == username:
+                    continue  # already processed this username above
                 user = await get_user_by_username(entity_username, chat_id)
                 if user:
                     return user["telegram_id"], user.get("first_name") or entity_username, user.get("username"), ""
