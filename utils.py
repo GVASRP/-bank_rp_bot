@@ -43,28 +43,40 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
         return target.id, target.full_name, target.username, ""
 
     chat_id = message.chat.id
+    username = args[1].lstrip("@") if len(args) > 1 else ""
 
+    # Collect all text_mention entities for cross-reference
+    mention_map = {}
     if message.entities:
         for entity in message.entities:
             if entity.type == "text_mention":
-                mention_text = message.text[entity.offset:entity.offset + entity.length]
-                text_username = mention_text.lstrip("@")
-                if text_username and (entity.user.username or "").lower() == text_username.lower():
-                    return entity.user.id, entity.user.full_name, entity.user.username, ""
-                continue
+                mention_map[entity.user.id] = entity.user
+
+    # Try typed username first
+    if username:
+        user = await get_user_by_username(username, chat_id)
+        if user:
+            # If entity has same telegram_id but fresher username, use entity data
+            if user["telegram_id"] in mention_map:
+                entity_user = mention_map[user["telegram_id"]]
+                if entity_user.username and entity_user.username.lower() != (user.get("username") or "").lower():
+                    return entity_user.id, entity_user.full_name, entity_user.username, ""
+            return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
+
+    # Fallback: use text_mention entity (authoritative telegram_id)
+    if mention_map:
+        for eid, entity_user in mention_map.items():
+            return entity_user.id, entity_user.full_name, entity_user.username, ""
+
+    # Fallback: mention entities → extract username
+    if message.entities:
+        for entity in message.entities:
             if entity.type == "mention":
                 mention_text = message.text[entity.offset:entity.offset + entity.length]
-                username = mention_text.lstrip("@")
-                user = await get_user_by_username(username, chat_id)
-                if user and (user.get("username") or "").lower() == username.lower():
-                    return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
-
-    username = ""
-    if len(args) > 1:
-        username = args[1].lstrip("@")
-        user = await get_user_by_username(username, chat_id)
-        if user and (user.get("username") or "").lower() == username.lower():
-            return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
+                entity_username = mention_text.lstrip("@")
+                user = await get_user_by_username(entity_username, chat_id)
+                if user:
+                    return user["telegram_id"], user.get("first_name") or entity_username, user.get("username"), ""
 
     hint = ""
     if username:

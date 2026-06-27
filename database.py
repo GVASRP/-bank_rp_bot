@@ -439,9 +439,9 @@ async def get_user_by_username(username: str, chat_id: int = 0) -> Optional[dict
             return dict(row) if row else None
         else:
             if chat_id:
-                cursor = await conn.execute("SELECT * FROM users WHERE username = ? AND chat_id = ?", (username, chat_id))
+                cursor = await conn.execute("SELECT * FROM users WHERE username = ? AND chat_id = ? ORDER BY id DESC", (username, chat_id))
             else:
-                cursor = await conn.execute("SELECT * FROM users WHERE username = ?", (username,))
+                cursor = await conn.execute("SELECT * FROM users WHERE username = ? ORDER BY id DESC", (username,))
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
