@@ -17,7 +17,7 @@ from database import (
     get_pending_job_requests,
     approve_job_request,
     reject_job_request,
-    is_mayor_taken,
+    is_job_taken,
     update_balance,
     add_transaction,
 )
@@ -134,10 +134,10 @@ async def cmd_take_job(message: Message):
         await message.reply(f"❌ Профессия \"{job_name}\" не найдена. Список: <code>!работа</code>", parse_mode="HTML")
         return
 
-    if job["name"] == "Мэр":
-        taken = await is_mayor_taken(message.chat.id)
+    if job["name"] in ("Мэр", "Прокурор"):
+        taken = await is_job_taken(message.chat.id, job["name"])
         if taken:
-            await message.reply("❌ Должность мэра уже занята. Дождитесь, пока текущий мэр покинет пост.")
+            await message.reply(f"❌ Должность \"{job['name']}\" уже занята. Дождитесь, пока текущий сотрудник покинет пост.")
             return
 
     await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, chat_id=message.chat.id)

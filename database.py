@@ -1419,26 +1419,26 @@ async def reject_job_request(request_id: int) -> bool:
         await conn.close()
 
 
-async def is_mayor_taken(chat_id: int) -> bool:
+async def is_job_taken(chat_id: int, job_name: str) -> bool:
     conn = await get_conn()
     try:
         job_id_q = "SELECT id FROM job_roles WHERE chat_id = $1 AND name = $2" if _is_pg else \
                    "SELECT id FROM job_roles WHERE chat_id = ? AND name = ?"
         if _is_pg:
-            row = await conn.fetchrow(job_id_q, chat_id, "Мэр")
+            row = await conn.fetchrow(job_id_q, chat_id, job_name)
         else:
-            cursor = await conn.execute(job_id_q, (chat_id, "Мэр"))
+            cursor = await conn.execute(job_id_q, (chat_id, job_name))
             row = await cursor.fetchone()
         if not row:
             return False
-        mayor_job_id = row["id"]
+        job_id = row["id"]
         if _is_pg:
             r = await conn.fetchrow(
-                "SELECT 1 FROM user_jobs WHERE chat_id = $1 AND job_id = $2", chat_id, mayor_job_id,
+                "SELECT 1 FROM user_jobs WHERE chat_id = $1 AND job_id = $2", chat_id, job_id,
             )
         else:
             cursor = await conn.execute(
-                "SELECT 1 FROM user_jobs WHERE chat_id = ? AND job_id = ?", (chat_id, mayor_job_id),
+                "SELECT 1 FROM user_jobs WHERE chat_id = ? AND job_id = ?", (chat_id, job_id),
             )
             r = await cursor.fetchone()
         return r is not None
