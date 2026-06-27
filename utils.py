@@ -4,7 +4,7 @@ from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message
 
-from database import get_user_by_username
+from database import get_user_by_username, get_or_create_user
 
 ADMIN_CACHE = {}
 
@@ -61,6 +61,17 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
                 entity_user = mention_map[user["telegram_id"]]
                 if entity_user.username and entity_user.username.lower() != (user.get("username") or "").lower():
                     return entity_user.id, entity_user.full_name, entity_user.username, ""
+            # Verify current Telegram username via API to catch stale DB data
+            try:
+                chat = await message.bot.get_chat(user["telegram_id"])
+                if chat.username is not None:
+                    current = chat.username.lower()
+                    db_val = (user.get("username") or "").lower()
+                    if current != db_val:
+                        await get_or_create_user(user["telegram_id"], chat.username, chat.first_name or "", chat_id)
+                        return user["telegram_id"], chat.first_name or username, chat.username, ""
+            except Exception:
+                pass
             return user["telegram_id"], user.get("first_name") or username, user.get("username"), ""
 
     # Fallback: use text_mention entity (authoritative telegram_id)
