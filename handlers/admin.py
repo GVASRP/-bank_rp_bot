@@ -25,6 +25,7 @@ from database import (
     get_all_vehicles_by_owner,
     admin_take_vehicle,
     admin_give_vehicle,
+    clear_user_vehicles,
     clear_posted_listings,
     clear_available_vehicles,
     reset_all_balances,
@@ -667,6 +668,22 @@ async def cmd_give_car(message: Message):
         await message.reply(f"❌ Ошибка выдачи")
         return
     await message.reply(f"✅ Авто #{vid} {v['year']} {v['make']} {v['model']} выдано пользователю {parts[1]}")
+
+
+@router.message(Command("очистить_авто", prefix="!/"))
+async def cmd_clear_user_cars(message: Message):
+    if not await ensure_admin(message):
+        return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply("❌ Использование: <code>!очистить_авто @user</code>", parse_mode="HTML")
+        return
+    uid, _, _, _ = await resolve_target(message, parts)
+    if uid is None:
+        await message.reply("❌ Пользователь не найден")
+        return
+    count = await clear_user_vehicles(uid)
+    await message.reply(f"✅ Очищено <b>{count}</b> автомобилей пользователя", parse_mode="HTML")
 
 
 @router.message(Command("очистить_объявления", prefix="!/"))

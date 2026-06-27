@@ -1755,6 +1755,26 @@ async def get_all_vehicles_by_owner(telegram_id: int) -> list:
         await conn.close()
 
 
+async def clear_user_vehicles(telegram_id: int) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE owner_telegram_id = $1",
+                telegram_id,
+            )
+            return result.split()[-1] if hasattr(result, 'split') else 0
+        else:
+            cursor = await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE owner_telegram_id = ?",
+                (telegram_id,),
+            )
+            await conn.commit()
+            return cursor.rowcount
+    finally:
+        await conn.close()
+
+
 async def admin_take_vehicle(vehicle_id: int) -> bool:
     conn = await get_conn()
     try:
