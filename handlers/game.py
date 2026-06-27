@@ -11,6 +11,7 @@ from database import (
     get_user_vehicles,
     buy_vehicle,
     sell_vehicle,
+    seed_houses,
     get_house,
     get_available_houses,
     get_user_houses,
@@ -179,7 +180,8 @@ async def cmd_sell_car(message: Message):
 
 @router.message(Command("дома", prefix="!/"))
 async def cmd_houses(message: Message):
-    houses = await get_available_houses()
+    await seed_houses(message.chat.id)
+    houses = await get_available_houses(message.chat.id)
     if not houses:
         await message.reply("📭 Нет доступных домов")
         return
@@ -187,8 +189,8 @@ async def cmd_houses(message: Message):
     for h in houses:
         lines.append(
             f"#{h['id']} — {h['type_name']}\n"
-            f"   📍 {h['location']} | 💰 ${h['price']:,}\n"
-            f"   🛏 {h['bedrooms']} | 🛁 {h['bathrooms']} | 📐 {h['sqft']} кв.футов"
+            f"   📍 <b>{h['neighborhood']}</b> — {h['location']}\n"
+            f"   💰 ${h['price']:,} | 🛏 {h['bedrooms']} | 🛁 {h['bathrooms']} | 📐 {h['sqft']} кв.футов"
         )
     await message.reply("\n".join(lines), parse_mode="HTML")
 
@@ -214,7 +216,7 @@ async def cmd_house_info(message: Message):
         owner = f"Владелец: {get_user_display(owner_user)}"
     await message.reply(
         f"🏠 <b>{h['type_name']}</b>\n"
-        f"📍 {h['location']}\n"
+        f"📍 <b>{h['neighborhood']}</b> — {h['location']}\n"
         f"💰 ${h['price']:,}\n"
         f"🛏 {h['bedrooms']} спальни | 🛁 {h['bathrooms']} ванны | 📐 {h['sqft']} кв.футов\n"
         f"📝 {h['description'] or ''}\n"
@@ -260,7 +262,7 @@ async def cmd_buy_house(message: Message):
 
     await message.reply(
         f"✅ Вы купили <b>{h['type_name']}</b>!\n"
-        f"📍 {h['location']}\n"
+        f"📍 <b>{h['neighborhood']}</b> — {h['location']}\n"
         f"💰 Цена: ${h['price']:,}",
         parse_mode="HTML",
     )
@@ -268,7 +270,7 @@ async def cmd_buy_house(message: Message):
 
 @router.message(Command("мои_дома", prefix="!/"))
 async def cmd_my_houses(message: Message):
-    houses = await get_user_houses(message.from_user.id)
+    houses = await get_user_houses(message.from_user.id, message.chat.id)
     if not houses:
         await message.reply("📭 У вас нет домов")
         return
@@ -276,7 +278,7 @@ async def cmd_my_houses(message: Message):
     for h in houses:
         lines.append(
             f"#{h['id']} — {h['type_name']}\n"
-            f"   📍 {h['location']} | 🛏 {h['bedrooms']}"
+            f"   📍 <b>{h['neighborhood']}</b> — {h['location']} | 🛏 {h['bedrooms']}"
         )
     await message.reply("\n".join(lines), parse_mode="HTML")
 

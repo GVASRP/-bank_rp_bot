@@ -147,8 +147,10 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS houses (
                 id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL DEFAULT 0,
                 type_name TEXT NOT NULL,
                 location TEXT NOT NULL,
+                neighborhood TEXT NOT NULL DEFAULT '',
                 price INTEGER NOT NULL,
                 bedrooms INTEGER NOT NULL,
                 bathrooms REAL NOT NULL,
@@ -276,8 +278,10 @@ async def init_db():
                 );
                 CREATE TABLE IF NOT EXISTS houses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
                     type_name TEXT NOT NULL,
                     location TEXT NOT NULL,
+                    neighborhood TEXT NOT NULL DEFAULT '',
                     price INTEGER NOT NULL,
                     bedrooms INTEGER NOT NULL,
                     bathrooms REAL NOT NULL,
@@ -1079,7 +1083,7 @@ async def get_chat_stats(chat_id: int) -> dict:
             users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE chat_id = $1", chat_id)
             total_bal = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE chat_id = $1", chat_id)
             cars = await conn.fetchval("SELECT COUNT(*) FROM vehicles WHERE chat_id = $1 AND status = 'available'", chat_id)
-            houses = await conn.fetchval("SELECT COUNT(*) FROM houses WHERE status = 'available'")
+            houses = await conn.fetchval("SELECT COUNT(*) FROM houses WHERE chat_id = $1 AND status = 'available'", chat_id)
         else:
             cursor = await conn.execute("SELECT COUNT(*) FROM users WHERE chat_id = ?", (chat_id,))
             row = await cursor.fetchone()
@@ -1090,7 +1094,7 @@ async def get_chat_stats(chat_id: int) -> dict:
             cursor = await conn.execute("SELECT COUNT(*) FROM vehicles WHERE chat_id = ? AND status = 'available'", (chat_id,))
             row = await cursor.fetchone()
             cars = row[0] if row else 0
-            cursor = await conn.execute("SELECT COUNT(*) FROM houses WHERE status = 'available'")
+            cursor = await conn.execute("SELECT COUNT(*) FROM houses WHERE chat_id = ? AND status = 'available'", (chat_id,))
             row = await cursor.fetchone()
             houses = row[0] if row else 0
         return {"users": users, "total_balance": total_bal, "available_cars": cars, "available_houses": houses}
@@ -1197,6 +1201,64 @@ DEFAULT_JOBS = [
     ("Visit 24/7 Motel Worker", 900),
     ("Visitor's Worker", 900),
     ("bobahaus Worker", 900),
+]
+
+# (type_name, neighborhood, location, price, beds, baths, sqft, description)
+DEFAULT_HOUSES = [
+    ("Mobile Home", "Six Housen't", "Six Housen't, Greenville, WI", 65000, 3, 2.5, 900,
+     "Самый бюджетный вариант. 3 спальни, 2.5 ванны. Построен между 1940 и 1980."),
+    ("90's 2-Story House", "Lakeville", "Lakeville, Greenville, WI", 145000, 3, 2.5, 1600,
+     "Двухэтажный дом среднего класса. 3 спальни, 2.5 ванны. Бильярд на втором этаже. 1987–2010."),
+    ("Average Suburban House", "Greenhills", "Greenhills, Greenville, WI", 120000, 3, 2.5, 1400,
+     "Стандартный пригородный дом. 3 спальни, 2.5 ванны, 5 шкафов. 1956–1982."),
+    ("Modern Average Suburban House", "Greenhills", "Greenhills, Greenville, WI", 165000, 3, 2.5, 1700,
+     "Современный пригородный дом на 3 спальни, 2.5 ванны. Гараж на 3 машины. 1988–2003."),
+    ("Upper-Class 90's Bungalow", "Lakeville", "Lakeville, Greenville, WI", 110000, 2, 1.5, 1100,
+     "Небольшой бунгало верхнего среднего класса. 2 спальни, 1.5 ванны. 1989–1998."),
+    ("Average 2-Story House", "Six Housen't", "Six Housen't, Greenville, WI", 200000, 4, 3.5, 2200,
+     "Двухэтажный дом в фермерском стиле. 4 спальни, 3.5 ванны. 2 гостиные, 2 столовые. 1975–1995."),
+    ("Mansion #1", "Horton", "Horton, Greenville, WI", 350000, 5, 3.5, 4000,
+     "Особняк! 5 спальни, 3.5 ванны. 2 гостиные, 2 столовые, огромная кухня. 1990–наши дни."),
+    ("Old Farmhouse", "Farm Area", "Ферма у Visitors Sports Grill, Greenville, WI", 195000, 4, 2.5, 2500,
+     "Старый фермерский дом с камином, верандой, кабинетом и отдельным гаражом на 2 машины. 1890–1945."),
+    ("Lakeside Lodge", "Greenville Lake", "Greenville Lake, Greenville, WI", 480000, 4, 3.5, 3800,
+     "Дом на озере с пирсом и двумя балконами. Цокольный этаж с бильярдом. Гараж отдельно. 2005–наши дни."),
+    ("Average 2-Story Suburban House", "Lakeville", "Lakeville, Greenville, WI", 150000, 3, 3, 1800,
+     "Пригородный двухэтажный дом. 3 спальни, 3 ванны. Кабинет, прачечная, гараж. 1965–1980."),
+    ("Old Suburban House", "Horton", "Horton, Greenville, WI", 135000, 4, 4, 2000,
+     "Старый пригородный дом. 4 спальни, 4 ванны. 2 гостиные, прачечная, гараж. 1920–1959."),
+    ("Original 2-Story Suburban House", "Fleetwood Lane", "Fleetwood Lane, Greenville, WI", 250000, 3, 3, 1800,
+     "Редчайший дом! Единственный экземпляр в игре. Оригинал из бета-версии Greenville. 1982."),
+    ("Average 2-Story Suburban House #3", "Six Housen't", "Six Housen't, Greenville, WI", 155000, 3, 2.5, 1700,
+     "Пригородный двухэтажный дом с гостиной, прачечной и гаражом. 1960–1980."),
+    ("Mansion #2", "Horton", "Horton, Greenville, WI", 380000, 4, 3.5, 4200,
+     "Второй особняк. 4 спальни, 3.5 ванны. Бильярд, фойе, гардеробная. 1990–наши дни."),
+    ("Large 2-Story Suburban House", "Lakeville", "Lakeville, Greenville, WI", 210000, 3, 3, 2400,
+     "Большой двухэтажный пригородный дом. 3 спальни, 3 ванны. Бильярд, лофт, веранда. 1980–2010."),
+    ("Average Suburban House", "Greenhills", "Greenhills, Greenville, WI", 175000, 5, 3, 2300,
+     "Просторный пригородный дом. 5 спальни, 3 ванны. Игровая зона наверху. 1990–наши дни."),
+    ("Mobile Home", "Six Housen't", "Six Housen't, Greenville, WI", 40000, 1, 1, 500,
+     "Маленький мобильный дом на одну спальню. Самый дешёвый вариант. 2005–наши дни."),
+    ("Modern Triangle House", "Greenhills", "Greenhills, Greenville, WI", 185000, 3, 2, 1600,
+     "Современный треугольный дом. 3 спальни, 2 ванны. Лофт наверху, прачечная. 2015–наши дни."),
+    ("Modern House", "Lakeville", "Lakeville, Greenville, WI", 170000, 3, 2, 1500,
+     "Современный дом в минималистичном стиле."),
+    ("2-Story Modern House", "Greenhills", "Greenhills, Greenville, WI", 195000, 3, 2.5, 1900,
+     "Двухэтажный современный дом."),
+    ("Mid-Century Modern House", "Lakeville", "Lakeville, Greenville, WI", 160000, 3, 2, 1500,
+     "Дом середины века в стиле модерн. Оригинал 1960–1975, реновирован в 2015."),
+    ("Modern House", "Six Housen't", "Six Housen't, Greenville, WI", 165000, 3, 2, 1500,
+     "Современный дом."),
+    ("Cozy Rustic Suburban House", "Greenhills", "Greenhills, Greenville, WI", 190000, 3, 3, 2000,
+     "Уютный деревенский пригородный дом. 3 спальни, 3 ванны. Кабинет, патио, гараж. v1.62.0."),
+    ("Average Suburban Family House", "Six Housen't", "Six Housen't, Greenville, WI", 180000, 4, 3, 2200,
+     "Средний семейный дом. 4 спальни, 3 ванны. Кабинет, кладовая, две веранды. v1.62.0."),
+    ("Large 2-Story House", "Horton", "Horton, Greenville, WI", 230000, 3, 3, 2500,
+     "Большой двухэтажный дом. 3 спальни, 3 ванны. 2 гостиные, кабинет, веранды. v1.62.0."),
+    ("2-Story Suburban House", "Greenhills", "Greenhills, Greenville, WI", 200000, 4, 3, 2300,
+     "Двухэтажный пригородный дом. 4 спальни, 3 ванны. Кабинет, кладовая, фойе. v1.62.0."),
+    ("2-Story Farm-Style House", "Farm Area", "Ферма, Greenville, WI", 220000, 3, 3, 2400,
+     "Двухэтажный фермерский дом с лофтом над гостиной. Кладовка, гараж, две веранды. 2015–наши дни."),
 ]
 
 
@@ -1619,22 +1681,48 @@ async def admin_give_vehicle(vehicle_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def create_house(type_name: str, location: str, price: int, bedrooms: int,
-                       bathrooms: float, sqft: int, description: str = "", photo_url: str = "") -> int:
+async def seed_houses(chat_id: int) -> None:
+    conn = await get_conn()
+    try:
+        existing = await get_available_houses(chat_id)
+        if existing:
+            return
+        for h in DEFAULT_HOUSES:
+            type_name, neighborhood, location, price, beds, baths, sqft, desc = h
+            if _is_pg:
+                await conn.execute(
+                    "INSERT INTO houses (chat_id, type_name, location, neighborhood, price, bedrooms, bathrooms, sqft, description) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+                    chat_id, type_name, location, neighborhood, price, beds, baths, sqft, desc,
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO houses (chat_id, type_name, location, neighborhood, price, bedrooms, bathrooms, sqft, description) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (chat_id, type_name, location, neighborhood, price, beds, baths, sqft, desc),
+                )
+        if not _is_pg:
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def create_house(chat_id: int, type_name: str, neighborhood: str, location: str, price: int,
+                       bedrooms: int, bathrooms: float, sqft: int, description: str = "") -> int:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO houses (type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-                type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url,
+                "INSERT INTO houses (chat_id, type_name, location, neighborhood, price, bedrooms, bathrooms, sqft, description) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+                chat_id, type_name, location, neighborhood, price, bedrooms, bathrooms, sqft, description,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO houses (type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (type_name, location, price, bedrooms, bathrooms, sqft, description, photo_url),
+                "INSERT INTO houses (chat_id, type_name, location, neighborhood, price, bedrooms, bathrooms, sqft, description) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (chat_id, type_name, location, neighborhood, price, bedrooms, bathrooms, sqft, description),
             )
             await conn.commit()
             return cursor.lastrowid
@@ -1656,26 +1744,36 @@ async def get_house(house_id: int) -> dict | None:
         await conn.close()
 
 
-async def get_available_houses() -> list:
+async def get_available_houses(chat_id: int) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM houses WHERE status = 'available' ORDER BY created_at DESC")
+            rows = await conn.fetch(
+                "SELECT * FROM houses WHERE chat_id = $1 AND status = 'available' ORDER BY created_at DESC", chat_id,
+            )
         else:
-            cursor = await conn.execute("SELECT * FROM houses WHERE status = 'available' ORDER BY created_at DESC")
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE chat_id = ? AND status = 'available' ORDER BY created_at DESC", (chat_id,),
+            )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
         await conn.close()
 
 
-async def get_user_houses(telegram_id: int) -> list:
+async def get_user_houses(telegram_id: int, chat_id: int) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM houses WHERE owner_telegram_id = $1 ORDER BY created_at DESC", telegram_id)
+            rows = await conn.fetch(
+                "SELECT * FROM houses WHERE owner_telegram_id = $1 AND chat_id = $2 ORDER BY created_at DESC",
+                telegram_id, chat_id,
+            )
         else:
-            cursor = await conn.execute("SELECT * FROM houses WHERE owner_telegram_id = ? ORDER BY created_at DESC", (telegram_id,))
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE owner_telegram_id = ? AND chat_id = ? ORDER BY created_at DESC",
+                (telegram_id, chat_id),
+            )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:

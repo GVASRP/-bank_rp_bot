@@ -536,29 +536,31 @@ async def cmd_auto_posts(message: Message):
 async def cmd_add_house(message: Message):
     if not await ensure_admin(message):
         return
-    parts = message.text.split(maxsplit=6)
-    if len(parts) < 6:
+    parts = message.text.split(maxsplit=8)
+    if len(parts) < 8:
         await message.reply(
-            "❌ Использование: <code>!добавить_дом тип_жилья локация цена комнаты ванны площадь [описание]</code>\n"
-            "Пример: <code>!добавить_дом house \"Мэдисон,WI\" 350000 3 2 1800 \"Большой задний двор\"</code>",
+            "❌ Использование: <code>!добавить_дом тип_жилья район локация цена комнаты ванны площадь [описание]</code>\n"
+            "Пример: <code>!добавить_дом \"Mobile Home\" \"Six Housen't\" \"Greenville,WI\" 65000 3 2.5 900 \"Описание\"</code>",
             parse_mode="HTML",
         )
         return
     type_name = parts[1]
-    location = parts[2]
+    neighborhood = parts[2]
+    location = parts[3]
     try:
-        price = int(parts[3])
-        bedrooms = int(parts[4])
-        bathrooms = int(parts[5])
-        sqft = int(parts[6])
+        price = int(parts[4])
+        bedrooms = int(parts[5])
+        bathrooms = int(parts[6])
+        sqft = int(parts[7])
     except ValueError:
         await message.reply("❌ Цена, комнаты, ванны, площадь — должны быть числами")
         return
-    description = parts[7] if len(parts) > 7 else None
-    hid = await create_house(type_name, location, price, bedrooms, bathrooms, sqft, description)
+    description = parts[8] if len(parts) > 8 else None
+    hid = await create_house(message.chat.id, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description or "")
     await message.reply(
         f"✅ Дом добавлен!\n"
-        f"🏠 #{hid} {type_name} — {location}\n"
+        f"🏠 #{hid} {type_name}\n"
+        f"📍 <b>{neighborhood}</b> — {location}\n"
         f"💰 ${price:,} | 🛏 {bedrooms} | 🛁 {bathrooms} | 📐 {sqft} кв.футов",
         parse_mode="HTML",
     )
