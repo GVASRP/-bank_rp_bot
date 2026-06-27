@@ -1580,18 +1580,16 @@ async def buy_player_vehicle(vehicle_id: int, buyer_id: int) -> bool:
         await conn.close()
 
 
-async def get_player_listed_vehicles(chat_id: int) -> list:
+async def get_player_listed_vehicles(chat_id: int = 0) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
             rows = await conn.fetch(
-                "SELECT * FROM vehicles WHERE status = 'player_listed' AND chat_id = $1 ORDER BY created_at DESC",
-                chat_id,
+                "SELECT * FROM vehicles WHERE status = 'player_listed' ORDER BY created_at DESC",
             )
         else:
             cursor = await conn.execute(
-                "SELECT * FROM vehicles WHERE status = 'player_listed' AND chat_id = ? ORDER BY created_at DESC",
-                (chat_id,),
+                "SELECT * FROM vehicles WHERE status = 'player_listed' ORDER BY created_at DESC",
             )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]

@@ -37,7 +37,7 @@ async def cmd_vehicles(message: Message):
         ok = await post_new_car(message.bot, message.chat.id, message.message_thread_id)
         if ok:
             market = await get_available_vehicles(chat_id=message.chat.id)
-    player = await get_player_listed_vehicles(message.chat.id)
+    player = await get_player_listed_vehicles()
     if not market and not player:
         await message.reply("📭 Нет доступных автомобилей")
         return
@@ -109,19 +109,24 @@ async def cmd_buy_car(message: Message):
         await message.reply("❌ Номер должен быть числом")
         return
 
-    all_vehicles = []
     market = await get_available_vehicles(chat_id=message.chat.id)
     if not market:
         ok = await post_new_car(message.bot, message.chat.id, message.message_thread_id)
         if ok:
             market = await get_available_vehicles(chat_id=message.chat.id)
-    player = await get_player_listed_vehicles(message.chat.id)
+    player = await get_player_listed_vehicles()
     all_vehicles = (market or []) + (player or [])
 
-    if pos < 1 or pos > len(all_vehicles):
+    v = None
+    if 1 <= pos <= len(all_vehicles):
+        v = all_vehicles[pos - 1]
+    else:
+        v = await get_vehicle(pos)
+        if v and v.get("status") not in ("available", "player_listed"):
+            v = None
+    if not v:
         await message.reply(f"❌ Автомобиль #{pos} не найден")
         return
-    v = all_vehicles[pos - 1]
 
     if not await update_balance(message.from_user.id, -v["price"], message.chat.id):
         user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
