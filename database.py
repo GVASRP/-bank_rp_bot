@@ -5,20 +5,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_FILE = "bank.db"
 
 _is_pg = DATABASE_URL is not None
-_pg_conn = None
+_pg_pool = None
 
 
 async def get_conn():
-    global _pg_conn
+    global _pg_pool
     if _is_pg:
-        try:
-            if _pg_conn is None or _pg_conn.is_closed():
-                import asyncpg
-                _pg_conn = await asyncpg.connect(DATABASE_URL)
-            return _pg_conn
-        except Exception:
-            _pg_conn = None
-            raise
+        import asyncpg
+        if _pg_pool is None:
+            _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+        return await _pg_pool.acquire()
     else:
         import aiosqlite
         db = await aiosqlite.connect(DATABASE_FILE)
@@ -27,10 +23,10 @@ async def get_conn():
 
 
 async def close_conn():
-    global _pg_conn
-    if _pg_conn is not None:
-        await _pg_conn.close()
-        _pg_conn = None
+    global _pg_pool
+    if _pg_pool is not None:
+        await _pg_pool.close()
+        _pg_pool = None
 
 
 async def init_db():
@@ -302,9 +298,11 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
         if _is_pg:
             row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             if not row:
+                start_raw = await conn.fetchrow("SELECT value FROM config WHERE key = 'start_balance'")
+                start_balance = int(start_raw["value"]) if start_raw else 0
                 row = await conn.fetchrow(
-                    "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES ($1, $2, $3, 0, $4) RETURNING *",
-                    telegram_id, username, first_name, chat_id,
+                    "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                    telegram_id, username, first_name, start_balance, chat_id,
                 )
             elif username or first_name:
                 await conn.execute(
@@ -317,9 +315,12 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
             cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
             user = await cursor.fetchone()
             if not user:
+                cursor2 = await conn.execute("SELECT value FROM config WHERE key = 'start_balance'")
+                start_raw = await cursor2.fetchone()
+                start_balance = int(start_raw["value"]) if start_raw else 0
                 await conn.execute(
-                    "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES (?, ?, ?, 0, ?)",
-                    (telegram_id, username, first_name, chat_id),
+                    "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES (?, ?, ?, ?, ?)",
+                    (telegram_id, username, first_name, start_balance, chat_id),
                 )
                 await conn.commit()
                 cursor = await conn.execute("SELECT * FROM users WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
@@ -334,8 +335,7 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
                 user = await cursor.fetchone()
             return dict(user)
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_user_by_telegram_id(telegram_id: int, chat_id: int = 0) -> Optional[dict]:
@@ -349,8 +349,7 @@ async def get_user_by_telegram_id(telegram_id: int, chat_id: int = 0) -> Optiona
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_user_by_username(username: str) -> Optional[dict]:
@@ -364,8 +363,7 @@ async def get_user_by_username(username: str) -> Optional[dict]:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def update_balance(telegram_id: int, amount: int, chat_id: int = 0) -> None:
@@ -377,8 +375,7 @@ async def update_balance(telegram_id: int, amount: int, chat_id: int = 0) -> Non
             await conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ? AND chat_id = ?", (amount, telegram_id, chat_id))
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def set_balance(telegram_id: int, amount: int, chat_id: int = 0) -> None:
@@ -390,8 +387,7 @@ async def set_balance(telegram_id: int, amount: int, chat_id: int = 0) -> None:
             await conn.execute("UPDATE users SET balance = ? WHERE telegram_id = ? AND chat_id = ?", (amount, telegram_id, chat_id))
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_balance(telegram_id: int, chat_id: int = 0) -> int:
@@ -405,8 +401,7 @@ async def get_balance(telegram_id: int, chat_id: int = 0) -> int:
             row = await cursor.fetchone()
             return row["balance"] if row else 0
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def add_transaction(type_: str, sender_id: Optional[int], receiver_id: Optional[int], amount: int, description: str = "") -> None:
@@ -424,8 +419,7 @@ async def add_transaction(type_: str, sender_id: Optional[int], receiver_id: Opt
             )
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_transactions(telegram_id: int, limit: int = 10) -> list:
@@ -444,8 +438,7 @@ async def get_transactions(telegram_id: int, limit: int = 10) -> list:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def create_credit_request(user_telegram_id: int, amount: int) -> int:
@@ -465,8 +458,7 @@ async def create_credit_request(user_telegram_id: int, amount: int) -> int:
             await conn.commit()
             return cursor.lastrowid
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_credit_requests(status: str = "pending") -> list:
@@ -483,8 +475,7 @@ async def get_credit_requests(status: str = "pending") -> list:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_credit_request(request_id: int) -> Optional[dict]:
@@ -498,8 +489,7 @@ async def get_credit_request(request_id: int) -> Optional[dict]:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def update_credit_request(request_id: int, status: str) -> None:
@@ -511,8 +501,7 @@ async def update_credit_request(request_id: int, status: str) -> None:
             await conn.execute("UPDATE credit_requests SET status = ? WHERE id = ?", (status, request_id))
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def create_deposit_request(user_telegram_id: int, amount: int) -> int:
@@ -532,8 +521,7 @@ async def create_deposit_request(user_telegram_id: int, amount: int) -> int:
             await conn.commit()
             return cursor.lastrowid
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_deposit_requests(status: str = "pending") -> list:
@@ -550,8 +538,7 @@ async def get_deposit_requests(status: str = "pending") -> list:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_deposit_request(request_id: int) -> Optional[dict]:
@@ -565,8 +552,7 @@ async def get_deposit_request(request_id: int) -> Optional[dict]:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def update_deposit_request(request_id: int, status: str) -> None:
@@ -578,8 +564,7 @@ async def update_deposit_request(request_id: int, status: str) -> None:
             await conn.execute("UPDATE deposit_requests SET status = ? WHERE id = ?", (status, request_id))
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def create_credit(user_telegram_id: int, amount: int, interest_rate: int = 10, duration_days: int = 30) -> int:
@@ -599,8 +584,7 @@ async def create_credit(user_telegram_id: int, amount: int, interest_rate: int =
             await conn.commit()
             return cursor.lastrowid
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_user_credits(user_telegram_id: int, status: str = "active") -> list:
@@ -619,8 +603,7 @@ async def get_user_credits(user_telegram_id: int, status: str = "active") -> lis
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_credit_by_id(credit_id: int) -> Optional[dict]:
@@ -634,8 +617,7 @@ async def get_credit_by_id(credit_id: int) -> Optional[dict]:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def repay_credit(credit_id: int, amount: int) -> bool:
@@ -690,8 +672,7 @@ async def repay_credit(credit_id: int, amount: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def create_deposit_account(user_telegram_id: int, amount: int, interest_rate: int = 5) -> int:
@@ -711,8 +692,7 @@ async def create_deposit_account(user_telegram_id: int, amount: int, interest_ra
             await conn.commit()
             return cursor.lastrowid
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_user_deposits(user_telegram_id: int, status: str = "active") -> list:
@@ -731,8 +711,7 @@ async def get_user_deposits(user_telegram_id: int, status: str = "active") -> li
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_deposit_by_id(deposit_id: int) -> Optional[dict]:
@@ -746,8 +725,7 @@ async def get_deposit_by_id(deposit_id: int) -> Optional[dict]:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def withdraw_deposit(deposit_id: int) -> bool:
@@ -768,8 +746,7 @@ async def withdraw_deposit(deposit_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_all_credits(status: str = "active") -> list:
@@ -786,8 +763,7 @@ async def get_all_credits(status: str = "active") -> list:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_all_deposits(status: str = "active") -> list:
@@ -804,8 +780,7 @@ async def get_all_deposits(status: str = "active") -> list:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def is_listing_posted(guid: str) -> bool:
@@ -818,8 +793,7 @@ async def is_listing_posted(guid: str) -> bool:
             cursor = await conn.execute("SELECT 1 FROM posted_listings WHERE guid = ?", (guid,))
             return cursor.fetchone() is not None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def mark_listing_posted(guid: str) -> None:
@@ -831,8 +805,7 @@ async def mark_listing_posted(guid: str) -> None:
             await conn.execute("INSERT OR IGNORE INTO posted_listings (guid) VALUES (?)", (guid,))
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def clear_posted_listings() -> int:
@@ -846,8 +819,7 @@ async def clear_posted_listings() -> int:
             await conn.commit()
             return cursor.rowcount
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def clear_available_vehicles() -> int:
@@ -861,8 +833,7 @@ async def clear_available_vehicles() -> int:
             await conn.commit()
             return cursor.rowcount
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_config(key: str) -> str | None:
@@ -876,8 +847,7 @@ async def get_config(key: str) -> str | None:
             row = await cursor.fetchone()
             return row["value"] if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def set_config(key: str, value: str) -> None:
@@ -895,8 +865,7 @@ async def set_config(key: str, value: str) -> None:
             )
             await conn.commit()
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def create_vehicle(make: str, model: str, year: int, price: int, miles: int,
@@ -920,8 +889,7 @@ async def create_vehicle(make: str, model: str, year: int, price: int, miles: in
             await conn.commit()
             return cursor.lastrowid
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_vehicle(vehicle_id: int) -> dict | None:
@@ -935,8 +903,7 @@ async def get_vehicle(vehicle_id: int) -> dict | None:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_available_vehicles() -> list:
@@ -949,8 +916,7 @@ async def get_available_vehicles() -> list:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_user_vehicles(telegram_id: int) -> list:
@@ -963,8 +929,7 @@ async def get_user_vehicles(telegram_id: int) -> list:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def buy_vehicle(vehicle_id: int, telegram_id: int) -> bool:
@@ -985,8 +950,7 @@ async def buy_vehicle(vehicle_id: int, telegram_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def sell_vehicle(vehicle_id: int, telegram_id: int) -> bool:
@@ -1012,8 +976,7 @@ async def sell_vehicle(vehicle_id: int, telegram_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_all_vehicles_by_owner(telegram_id: int) -> list:
@@ -1026,8 +989,7 @@ async def get_all_vehicles_by_owner(telegram_id: int) -> list:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def admin_take_vehicle(vehicle_id: int) -> bool:
@@ -1048,8 +1010,7 @@ async def admin_take_vehicle(vehicle_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def admin_give_vehicle(vehicle_id: int, telegram_id: int) -> bool:
@@ -1070,8 +1031,7 @@ async def admin_give_vehicle(vehicle_id: int, telegram_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def create_house(type_name: str, location: str, price: int, bedrooms: int,
@@ -1094,8 +1054,7 @@ async def create_house(type_name: str, location: str, price: int, bedrooms: int,
             await conn.commit()
             return cursor.lastrowid
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_house(house_id: int) -> dict | None:
@@ -1109,8 +1068,7 @@ async def get_house(house_id: int) -> dict | None:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_available_houses() -> list:
@@ -1123,8 +1081,7 @@ async def get_available_houses() -> list:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_user_houses(telegram_id: int) -> list:
@@ -1137,8 +1094,7 @@ async def get_user_houses(telegram_id: int) -> list:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def buy_house(house_id: int, telegram_id: int) -> bool:
@@ -1159,8 +1115,7 @@ async def buy_house(house_id: int, telegram_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def sell_house(house_id: int, telegram_id: int) -> bool:
@@ -1186,8 +1141,7 @@ async def sell_house(house_id: int, telegram_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def delete_house(house_id: int) -> bool:
@@ -1207,8 +1161,7 @@ async def delete_house(house_id: int) -> bool:
             await conn.commit()
             return True
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
 
 
 async def get_all_users_ranked(chat_id: int | None = None) -> list:
@@ -1227,5 +1180,24 @@ async def get_all_users_ranked(chat_id: int | None = None) -> list:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        if not _is_pg:
-            await conn.close()
+        await conn.close()
+
+
+async def reset_all_balances(chat_id: int | None = None, new_balance: int = 0) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            if chat_id is not None:
+                result = await conn.execute("UPDATE users SET balance = $1 WHERE chat_id = $2", new_balance, chat_id)
+            else:
+                result = await conn.execute("UPDATE users SET balance = $1", new_balance)
+            return int(result.split()[-1]) if result else 0
+        else:
+            if chat_id is not None:
+                cursor = await conn.execute("UPDATE users SET balance = ? WHERE chat_id = ?", (new_balance, chat_id))
+            else:
+                cursor = await conn.execute("UPDATE users SET balance = ?", (new_balance,))
+            await conn.commit()
+            return cursor.rowcount
+    finally:
+        await conn.close()

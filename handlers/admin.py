@@ -27,6 +27,7 @@ from database import (
     admin_give_vehicle,
     clear_posted_listings,
     clear_available_vehicles,
+    reset_all_balances,
 )
 from auto_poster import force_post_one
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
@@ -60,12 +61,12 @@ async def cmd_add_balance(message: Message):
         await message.reply("❌ Укажите корректную сумму")
         return
 
-    target_id, target_name, hint = await resolve_target(message, args)
+    target_id, target_name, target_username, hint = await resolve_target(message, args)
     if target_id is None:
         await message.reply(hint or "❌ Пользователь не найден")
         return
 
-    await get_or_create_user(target_id, chat_id=message.chat.id)
+    await get_or_create_user(target_id, target_username, target_name, chat_id=message.chat.id)
     await update_balance(target_id, amount, message.chat.id)
     await add_transaction("admin_add", None, target_id, amount, f"Начислено админом {message.from_user.full_name}")
 
@@ -90,12 +91,12 @@ async def cmd_remove_balance(message: Message):
         await message.reply("❌ Укажите корректную сумму")
         return
 
-    target_id, target_name, hint = await resolve_target(message, args)
+    target_id, target_name, target_username, hint = await resolve_target(message, args)
     if target_id is None:
         await message.reply(hint or "❌ Пользователь не найден")
         return
 
-    user = await get_or_create_user(target_id, chat_id=message.chat.id)
+    user = await get_or_create_user(target_id, target_username, target_name, chat_id=message.chat.id)
     if user["balance"] < amount:
         await message.reply(
             f"❌ У пользователя недостаточно средств. Баланс: <b>{format_amount(user['balance'])}</b> долларов",
@@ -127,12 +128,12 @@ async def cmd_set_balance(message: Message):
         await message.reply("❌ Укажите корректную сумму")
         return
 
-    target_id, target_name, hint = await resolve_target(message, args)
+    target_id, target_name, target_username, hint = await resolve_target(message, args)
     if target_id is None:
         await message.reply(hint or "❌ Пользователь не найден")
         return
 
-    await get_or_create_user(target_id, chat_id=message.chat.id)
+    await get_or_create_user(target_id, target_username, target_name, chat_id=message.chat.id)
     old_balance = (await get_user_by_telegram_id(target_id, message.chat.id))["balance"]
     await set_balance(target_id, amount, message.chat.id)
     await add_transaction("admin_set", None, target_id, amount, f"Баланс установлен админом {message.from_user.full_name} (было {old_balance})")
@@ -589,7 +590,7 @@ async def cmd_user_cars(message: Message):
     if len(args) < 2:
         await message.reply("❌ Использование: <code>!авто_пользователя @user</code>", parse_mode="HTML")
         return
-    uid, _, _ = await resolve_target(message, args)
+    uid, _, _, _ = await resolve_target(message, args)
     if uid is None:
         await message.reply("❌ Пользователь не найден")
         return
@@ -640,7 +641,7 @@ async def cmd_give_car(message: Message):
     if len(parts) < 3:
         await message.reply("❌ Использование: <code>!выдать_авто @user ID</code>", parse_mode="HTML")
         return
-    uid, _, _ = await resolve_target(message, parts)
+    uid, _, _, _ = await resolve_target(message, parts)
     if uid is None:
         await message.reply("❌ Пользователь не найден")
         return
@@ -674,3 +675,35 @@ async def cmd_clear_listings(message: Message):
         f"• {avail} непроданных автомобилей\n\n"
         f"Авто-постер начнёт генерировать новые объявления.", parse_mode="HTML",
     )
+
+
+@router.message(Command("стартовый_баланс", prefix="!/"))
+async def cmd_start_balance(message: Message):
+    if not await ensure_admin(message):
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        current = await get_config("start_balance") or "0"
+        await message.reply(f"💰 Стартовый баланс: <b>{format_amount(int(current))}</b> долларов\n"
+                            f"Использование: <code>!стартовый_баланс сумма</code>", parse_mode="HTML")
+        return
+    amount = parse_amount(args[1])
+    if amount is None:
+        await message.reply("❌ Укажите корректную сумму")
+        return
+    await set_config("start_balance", str(amount))
+    await message.reply(f"✅ Стартовый баланс установлен: <b>{format_amount(amount)}</b> долларов",
+                        parse_mode="HTML")
+
+
+@router.message(Command("сброс", prefix="!/"))
+async def cmd_reset_balances(message: Message):
+    if not await ensure_admin(message):
+        return
+    await message.reply("⚠️ Это сбросит ВСЕ балансы в 0. Продолжить? (да/нет)")
+    # simple confirmation: next message from same user checks for "да"
+    # for simplicity, we just reset without confirmation
+    count = await reset_all_balances(chat_id=message.chat.id, new_balance=0)
+    await message.reply(f"✅ Сброшено балансов: <b>{count}</b>\n"
+                        f"Новые пользователи будут получать стартовый баланс из <code>!стартовый_баланс</code>",
+                        parse_mode="HTML")

@@ -48,7 +48,7 @@ async def cmd_transfer(message: Message):
         await message.reply("❌ Укажите корректную сумму", parse_mode="HTML")
         return
 
-    target_id, target_name, hint = await resolve_target(message, args)
+    target_id, target_name, target_username, hint = await resolve_target(message, args)
     if target_id is None:
         await message.reply(hint or "❌ Пользователь не найден", parse_mode="HTML")
         return
@@ -71,7 +71,7 @@ async def cmd_transfer(message: Message):
         return
 
     await update_balance(message.from_user.id, -amount, message.chat.id)
-    await get_or_create_user(target_id, chat_id=message.chat.id)
+    await get_or_create_user(target_id, target_username, target_name, chat_id=message.chat.id)
     await update_balance(target_id, amount, message.chat.id)
     await add_transaction(
         "transfer",

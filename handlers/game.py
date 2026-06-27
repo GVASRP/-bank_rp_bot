@@ -35,11 +35,13 @@ async def cmd_vehicles(message: Message):
             await message.reply("📭 Нет доступных автомобилей")
             return
     lines = ["🚗 <b>Автомобили в продаже:</b>\n"]
-    for v in vehicles:
+    for v in vehicles[:20]:
         lines.append(
             f"#{v['id']} — {v['year']} {v['make']} {v['model']}\n"
             f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
         )
+    if len(vehicles) > 20:
+        lines.append(f"\n... и ещё {len(vehicles) - 20} машин")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
