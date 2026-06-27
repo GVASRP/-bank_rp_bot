@@ -1,3 +1,5 @@
+import random
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, BufferedInputFile
@@ -317,7 +319,13 @@ async def cmd_container(message: Message):
         )
         return
 
-    car = generate_car()
+    for _ in range(100):
+        car = generate_car()
+        if car["rarity"] == "legendary" and random.random() < 0.92:
+            continue
+        if car["rarity"] == "rare" and random.random() < 0.60:
+            continue
+        break
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
