@@ -414,6 +414,20 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
         await conn.close()
 
 
+async def clear_user_username(telegram_id: int, chat_id: int) -> None:
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "UPDATE users SET username = '' WHERE telegram_id = $1 AND chat_id = $2" if _is_pg
+            else "UPDATE users SET username = ? WHERE telegram_id = ? AND chat_id = ?",
+            (telegram_id, chat_id) if _is_pg else ("", telegram_id, chat_id),
+        )
+        if not _is_pg:
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
 async def get_user_by_telegram_id(telegram_id: int, chat_id: int = 0) -> Optional[dict]:
     conn = await get_conn()
     try:

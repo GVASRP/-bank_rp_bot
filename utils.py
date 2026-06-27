@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message
 
-from database import get_user_by_username, get_or_create_user
+from database import clear_user_username, get_user_by_username, get_or_create_user
 
 ADMIN_CACHE = {}
 
@@ -71,7 +71,7 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
                 db_username = (user.get("username") or "").lower()
                 if chat_username != db_username:
                     # Stale username — clear it from DB so next lookup won't find it
-                    await get_or_create_user(user["telegram_id"], "", chat.first_name or "", chat_id)
+                    await clear_user_username(user["telegram_id"], chat_id)
                     user = None
             except Exception as e:
                 logger.warning(f"resolve_target: get_chat failed for uid {user['telegram_id']}: {e}")
