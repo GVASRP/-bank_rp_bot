@@ -515,13 +515,14 @@ def generate_placeholder_image(car: dict) -> bytes:
 
 async def fetch_car_image(make: str, model: str) -> bytes | None:
     real_brand = get_real_brand(make)
+    searches = []
     if real_brand:
-        img = await _search_wiki_image(f"{real_brand} {model}")
+        searches.append(f"{real_brand} {model} car")
+    searches.append(f"{make} {model} car")
+    for term in searches:
+        img = await _search_wiki_image(term)
         if img:
             return img
-    img = await _search_wiki_image(f"{make} {model}")
-    if img:
-        return img
     return None
 
 

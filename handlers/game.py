@@ -11,6 +11,10 @@ from database import (
     get_user_vehicles,
     buy_vehicle,
     sell_vehicle,
+    list_vehicle_for_sale,
+    unlist_vehicle,
+    buy_player_vehicle,
+    get_player_listed_vehicles,
     seed_houses,
     get_house,
     get_available_houses,
@@ -28,23 +32,38 @@ router = Router()
 
 @router.message(Command("авто", prefix="!/"))
 async def cmd_vehicles(message: Message):
-    vehicles = await get_available_vehicles(chat_id=message.chat.id)
-    if not vehicles:
+    market = await get_available_vehicles(chat_id=message.chat.id)
+    if not market:
         ok = await post_new_car(message.bot, message.chat.id, message.message_thread_id)
         if ok:
-            vehicles = await get_available_vehicles(chat_id=message.chat.id)
-        if not vehicles:
-            await message.reply("📭 Нет доступных автомобилей")
-            return
-    lines = [f"🚗 <b>Автомобили в продаже:</b> {len(vehicles)} шт.\n"]
-    for i, v in enumerate(vehicles[:20], 1):
-        lines.append(
-            f"#{i} — {v['year']} {v['make']} {v['model']}\n"
-            f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
-        )
-    if len(vehicles) > 20:
-        lines.append(f"\n... и ещё {len(vehicles) - 20} машин")
-    lines.append(f"\n💡 <code>!купить номер</code> — купить авто")
+            market = await get_available_vehicles(chat_id=message.chat.id)
+    player = await get_player_listed_vehicles(message.chat.id)
+    if not market and not player:
+        await message.reply("📭 Нет доступных автомобилей")
+        return
+    lines = ["🚗 <b>Автомобили:</b>\n"]
+    idx = 1
+    if market:
+        lines.append(f"🏪 <b>Автосалон ({len(market)} шт.):</b>")
+        for v in market[:15]:
+            lines.append(
+                f"#{idx} — {v['year']} {v['make']} {v['model']}\n"
+                f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
+            )
+            idx += 1
+        lines.append("")
+    if player:
+        lines.append(f"🤝 <b>Б/У от игроков ({len(player)} шт.):</b>")
+        for v in player[:10]:
+            seller = await get_user_by_telegram_id(v["owner_telegram_id"])
+            seller_name = get_user_display(seller) if seller else "Неизвестно"
+            lines.append(
+                f"#{idx} — {v['year']} {v['make']} {v['model']}\n"
+                f"   💰 ${v['price']:,} | Продавец: {seller_name}"
+            )
+            idx += 1
+        lines.append("")
+    lines.append("💡 <code>!купить номер</code> — купить авто")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
@@ -90,13 +109,19 @@ async def cmd_buy_car(message: Message):
         await message.reply("❌ Номер должен быть числом")
         return
 
-    v = await get_vehicle_by_position(message.chat.id, pos) or await get_vehicle(pos)
-    if not v:
+    all_vehicles = []
+    market = await get_available_vehicles(chat_id=message.chat.id)
+    if not market:
+        ok = await post_new_car(message.bot, message.chat.id, message.message_thread_id)
+        if ok:
+            market = await get_available_vehicles(chat_id=message.chat.id)
+    player = await get_player_listed_vehicles(message.chat.id)
+    all_vehicles = (market or []) + (player or [])
+
+    if pos < 1 or pos > len(all_vehicles):
         await message.reply(f"❌ Автомобиль #{pos} не найден")
         return
-    if v["status"] != "available":
-        await message.reply(f"❌ Автомобиль #{pos} уже продан")
-        return
+    v = all_vehicles[pos - 1]
 
     if not await update_balance(message.from_user.id, -v["price"], message.chat.id):
         user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
@@ -106,23 +131,40 @@ async def cmd_buy_car(message: Message):
         )
         return
 
-    if not await buy_vehicle(v["id"], message.from_user.id):
-        await update_balance(message.from_user.id, v["price"], message.chat.id)
-        await message.reply(f"❌ Ошибка покупки, деньги возвращены")
-        return
-
-    new_bal = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
-    await add_transaction("buy_car", message.from_user.id, None, v["price"],
-                          f"Покупка авто #{v['id']} {v['year']} {v['make']} {v['model']}")
-
-    await message.reply(
-        f"✅ Вы купили <b>{v['year']} {v['make']} {v['model']}</b>!\n"
-        f"💰 Цена: ${v['price']:,}\n"
-        f"💳 Остаток: {format_amount(new_bal['balance'])} долларов\n"
-        f"🔑 Номера: {v['license_plate']}\n"
-        f"🆔 VIN: {v['vin']}",
-        parse_mode="HTML",
-    )
+    if v["status"] == "player_listed":
+        result = await buy_player_vehicle(v["id"], message.from_user.id)
+        if not result:
+            await update_balance(message.from_user.id, v["price"], message.chat.id)
+            await message.reply(f"❌ Ошибка покупки, деньги возвращены")
+            return
+        seller_id, price = result
+        await update_balance(seller_id, price, message.chat.id)
+        await add_transaction("buy_car", message.from_user.id, seller_id, price,
+                              f"Покупка у игрока #{v['id']} {v['year']} {v['make']} {v['model']}")
+        seller_name = get_user_display(await get_user_by_telegram_id(seller_id))
+        await message.reply(
+            f"✅ Вы купили у {seller_name} <b>{v['year']} {v['make']} {v['model']}</b>!\n"
+            f"💰 Цена: ${price:,}\n"
+            f"🔑 Номера: {v['license_plate']}\n"
+            f"🆔 VIN: {v['vin']}",
+            parse_mode="HTML",
+        )
+    else:
+        if not await buy_vehicle(v["id"], message.from_user.id):
+            await update_balance(message.from_user.id, v["price"], message.chat.id)
+            await message.reply(f"❌ Ошибка покупки, деньги возвращены")
+            return
+        await add_transaction("buy_car", message.from_user.id, None, v["price"],
+                              f"Покупка из салона #{v['id']} {v['year']} {v['make']} {v['model']}")
+        new_bal = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
+        await message.reply(
+            f"✅ Вы купили <b>{v['year']} {v['make']} {v['model']}</b>!\n"
+            f"💰 Цена: ${v['price']:,}\n"
+            f"💳 Остаток: {format_amount(new_bal['balance'])} долларов\n"
+            f"🔑 Номера: {v['license_plate']}\n"
+            f"🆔 VIN: {v['vin']}",
+            parse_mode="HTML",
+        )
 
 
 @router.message(Command("мои_авто", prefix="!/"))
@@ -133,10 +175,14 @@ async def cmd_my_cars(message: Message):
         return
     lines = ["🚗 <b>Ваши автомобили:</b>\n"]
     for v in vehicles:
+        status_emoji = "✅" if v["status"] == "sold" else "🔄"
+        price_info = f" | Цена: ${v['price']:,}" if v["status"] == "player_listed" else ""
         lines.append(
-            f"#{v['id']} — {v['year']} {v['make']} {v['model']}\n"
-            f"   🔑 {v['license_plate']} | 📍 {v['city']}"
+            f"#{v['id']} {status_emoji} {v['year']} {v['make']} {v['model']}\n"
+            f"   🔑 {v['license_plate']} | 📍 {v['city']}{price_info}"
         )
+    lines.append("\n💡 <code>!продать ID цена</code> — выставить на продажу игрокам")
+    lines.append("💡 <code>!снять_продажу ID</code> — убрать из продажи")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
@@ -176,6 +222,74 @@ async def cmd_sell_car(message: Message):
         f"💳 Баланс: {format_amount(new_bal['balance'])} долларов",
         parse_mode="HTML",
     )
+
+
+@router.message(Command("продать", prefix="!/"))
+async def cmd_list_car(message: Message):
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.reply("❌ Использование: <code>!продать ID_авто цена</code>\nПример: <code>!продать 5 25000</code>", parse_mode="HTML")
+        return
+    try:
+        vid = int(args[1])
+        price = int(args[2])
+    except ValueError:
+        await message.reply("❌ ID и цена должны быть числами")
+        return
+    if price <= 0:
+        await message.reply("❌ Цена должна быть больше 0")
+        return
+
+    v = await get_vehicle(vid)
+    if not v:
+        await message.reply(f"❌ Авто #{vid} не найдено")
+        return
+    if v["owner_telegram_id"] != message.from_user.id:
+        await message.reply("❌ Это не ваш автомобиль")
+        return
+    if v["status"] != "sold":
+        await message.reply("❌ Это авто уже выставлено на продажу или ещё не куплено")
+        return
+
+    if not await list_vehicle_for_sale(vid, message.from_user.id, price):
+        await message.reply("❌ Ошибка выставления на продажу")
+        return
+
+    await message.reply(
+        f"✅ {v['year']} {v['make']} {v['model']} выставлен на продажу за ${price:,}!\n"
+        f"💡 Другие игроки могут купить его через <code>!купить НОМЕР</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("снять_продажу", prefix="!/"))
+async def cmd_unlist_car(message: Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!снять_продажу ID_авто</code>", parse_mode="HTML")
+        return
+    try:
+        vid = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+
+    v = await get_vehicle(vid)
+    if not v:
+        await message.reply(f"❌ Авто #{vid} не найдено")
+        return
+    if v["owner_telegram_id"] != message.from_user.id:
+        await message.reply("❌ Это не ваш автомобиль")
+        return
+    if v["status"] != "player_listed":
+        await message.reply("❌ Это авто не выставлено на продажу")
+        return
+
+    if not await unlist_vehicle(vid, message.from_user.id):
+        await message.reply("❌ Ошибка снятия с продажи")
+        return
+
+    await message.reply(f"✅ {v['year']} {v['make']} {v['model']} снят с продажи", parse_mode="HTML")
 
 
 @router.message(Command("дома", prefix="!/"))

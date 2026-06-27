@@ -428,14 +428,20 @@ async def get_user_by_telegram_id(telegram_id: int, chat_id: int = 0) -> Optiona
         await conn.close()
 
 
-async def get_user_by_username(username: str) -> Optional[dict]:
+async def get_user_by_username(username: str, chat_id: int = 0) -> Optional[dict]:
     conn = await get_conn()
     try:
         if _is_pg:
-            row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", username)
+            if chat_id:
+                row = await conn.fetchrow("SELECT * FROM users WHERE username = $1 AND chat_id = $2", username, chat_id)
+            else:
+                row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", username)
             return dict(row) if row else None
         else:
-            cursor = await conn.execute("SELECT * FROM users WHERE username = ?", (username,))
+            if chat_id:
+                cursor = await conn.execute("SELECT * FROM users WHERE username = ? AND chat_id = ?", (username, chat_id))
+            else:
+                cursor = await conn.execute("SELECT * FROM users WHERE username = ?", (username,))
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
@@ -1106,101 +1112,42 @@ async def get_chat_stats(chat_id: int) -> dict:
 
 JOB_CATEGORIES = {
     # Law Enforcement
-    "Fox Valley Metro Police Department": "law",
-    "Outagamie County Sheriff's Office": "law",
-    "Wisconsin State Patrol": "law",
-    "National Park Service": "law",
+    "Мэр": "law", "Судья": "law", "Шериф": "law", "Прокурор": "law",
+    "Адвокат": "law", "Заместитель шерифа": "law",
+    "Офицер дорожной полиции": "law", "Полицейский": "law",
+    "Городской клерк": "law",
     # Emergency
-    "Brookmere Fire Department": "emergency",
-    "Greenville Fire Rescue": "emergency",
-    "Outagamie County Communications": "emergency",
+    "Пожарный": "emergency", "Фельдшер": "emergency",
+    # Medical
+    "Врач": "medical", "Медсестра": "medical",
     # Criminal
-    "Heist Crew": "criminal",
+    "Хакер": "criminal", "Наркоторговец": "criminal",
+    "Контрабандист": "criminal", "Угонщик": "criminal",
+    "Вор": "criminal", "Бандит": "criminal",
 }
 
 DEFAULT_JOBS = [
     # Law Enforcement
-    ("Fox Valley Metro Police Department", 2000),
-    ("Outagamie County Sheriff's Office", 2200),
-    ("Wisconsin State Patrol", 2500),
-    ("National Park Service", 1800),
+    ("Мэр", 4000), ("Судья", 3500), ("Шериф", 3000),
+    ("Прокурор", 2800), ("Адвокат", 2400),
+    ("Заместитель шерифа", 2400),
+    ("Офицер дорожной полиции", 2000), ("Полицейский", 1800),
+    ("Городской клерк", 1500),
     # Emergency
-    ("Brookmere Fire Department", 2000),
-    ("Greenville Fire Rescue", 2000),
-    ("Outagamie County Communications", 1500),
+    ("Пожарный", 2000), ("Фельдшер", 1800),
+    # Medical
+    ("Врач", 2500), ("Медсестра", 1600),
     # Criminal
-    ("Heist Crew", 2500),
-    # Interactive Delivery
-    ("GVPS Worker", 1400),
-    ("Sahara Delivery Worker", 1400),
-    ("Hunty's Pizza Palace Worker", 1400),
-    ("Taxi Driver", 1500),
-    ("School Bus Driver", 1200),
-    ("Wisconsin Department of Transportation", 1500),
-    ("Farmer", 1000),
-    ("TruckPlanet Mechanic", 1400),
-    # Interactive Other
-    ("Bulk Priced Food Shoppe Worker", 1000),
-    ("Burger Knight Cashier", 1000),
-    ("Burgerhaus Worker", 1000),
-    ("Connor's Worker", 1000),
-    ("Farnsworths Worker", 1000),
-    ("Roadmap Dealership Worker", 1200),
-    ("The Twist Worker", 900),
-    ("Quick Dollar Worker", 900),
-    # Passive
-    ("Allen Insurance Agent", 900),
-    ("Beyond Beauty Worker", 900),
-    ("Bill's Diner Worker", 900),
-    ("Bread Shack Baker", 900),
-    ("Brookmere Autos Worker", 1000),
-    ("Brookmere Brew Barista", 900),
-    ("Caffeine Street Barista", 900),
-    ("Celestial Dealership Worker", 1100),
-    ("Credit Union Banker", 1200),
-    ("Crispi Cookies Worker", 900),
-    ("DMV Worker", 1000),
-    ("Daycare Worker", 900),
-    ("Dom's Service Worker", 1000),
-    ("Driving Experience Center Teacher", 1000),
-    ("Enderson Cleaners", 800),
-    ("Factory Pulse Employee", 900),
-    ("Fiesta-Rodeo Worker", 900),
-    ("Fox Mountain Banker", 1200),
-    ("Fox Mountain Medical Worker", 1100),
-    ("Gary's Collision & Restoration Worker", 1000),
-    ("Gas Station Clerk", 1000),
-    ("Greenville Theater Worker", 900),
-    ("Greenville Town Hall Worker", 1000),
-    ("HeenerG Worker", 900),
-    ("Heritage Animal Hospital Worker", 1000),
-    ("Holey Smokes Employee", 900),
-    ("Home Barn American Grill Server", 900),
-    ("Horton Village Hall Worker", 900),
-    ("Ice Box Worker", 900),
-    ("Ice Cream Station Worker", 900),
-    ("Ignition Motor Parts Worker", 1000),
-    ("Just Buy Worker", 900),
-    ("Kat's Kafe Barista", 900),
-    ("Leo's Cafe Worker", 900),
-    ("Librarian", 900),
-    ("Lifeguard", 900),
-    ("Nerd Squad Worker", 900),
-    ("Ol' Texas Worker", 900),
-    ("Rapid Wash Worker", 900),
-    ("Ron Rivers Auto Group Worker", 1000),
-    ("Security Guard", 1000),
-    ("Student", 0),
-    ("Superwich Worker", 900),
-    ("Taco Castillo Worker", 900),
-    ("Teacher", 1000),
-    ("The Red Chopstick Worker", 900),
-    ("Timberwolf Drive In Worker", 900),
-    ("Tires+ Worker", 1000),
-    ("Verwire Worker", 900),
-    ("Visit 24/7 Motel Worker", 900),
-    ("Visitor's Worker", 900),
-    ("bobahaus Worker", 900),
+    ("Хакер", 3000), ("Наркоторговец", 2800),
+    ("Контрабандист", 2500), ("Угонщик", 2400),
+    ("Вор", 2200), ("Бандит", 2000),
+    # Civilian
+    ("Банкир", 2800), ("Автодилер", 2000),
+    ("Дальнобойщик", 1700), ("Механик", 1600),
+    ("Фермер", 1500), ("Строитель", 1500),
+    ("Водитель автобуса", 1400), ("Бармен", 1200),
+    ("Таксист", 1200), ("Кассир", 1000),
+    ("Работник заправки", 900), ("Официант", 800),
 ]
 
 # (type_name, neighborhood, location, price, beds, baths, sqft, description)
@@ -1272,25 +1219,53 @@ async def seed_jobs(chat_id: int) -> None:
         existing = await get_all_jobs(chat_id)
         existing_names = {j["name"] for j in existing}
         new_names = {j[0] for j in DEFAULT_JOBS}
-        if existing_names == new_names:
-            return
-        if _is_pg:
-            await conn.execute("DELETE FROM user_jobs WHERE chat_id = $1", chat_id)
-            await conn.execute("DELETE FROM job_roles WHERE chat_id = $1", chat_id)
-        else:
-            await conn.execute("DELETE FROM user_jobs WHERE chat_id = ?", (chat_id,))
-            await conn.execute("DELETE FROM job_roles WHERE chat_id = ?", (chat_id,))
+
         for name, salary in DEFAULT_JOBS:
+            if name in existing_names:
+                continue
             if _is_pg:
                 await conn.execute(
-                    "INSERT INTO job_roles (chat_id, name, salary) VALUES ($1, $2, $3)",
+                    "INSERT INTO job_roles (chat_id, name, salary) VALUES ($1, $2, $3) "
+                    "ON CONFLICT (chat_id, name) DO NOTHING",
                     chat_id, name, salary,
                 )
             else:
                 await conn.execute(
-                    "INSERT INTO job_roles (chat_id, name, salary) VALUES (?, ?, ?)",
+                    "INSERT OR IGNORE INTO job_roles (chat_id, name, salary) VALUES (?, ?, ?)",
                     (chat_id, name, salary),
                 )
+
+        orphan_names = existing_names - new_names
+        if orphan_names:
+            for name in orphan_names:
+                if _is_pg:
+                    row = await conn.fetchrow(
+                        "SELECT j.id FROM job_roles j WHERE j.chat_id = $1 AND j.name = $2",
+                        chat_id, name,
+                    )
+                else:
+                    cursor = await conn.execute(
+                        "SELECT j.id FROM job_roles j WHERE j.chat_id = ? AND j.name = ?",
+                        (chat_id, name),
+                    )
+                    row = await cursor.fetchone()
+                if row:
+                    job_id = row["id"]
+                    if _is_pg:
+                        used = await conn.fetchval(
+                            "SELECT 1 FROM user_jobs WHERE job_id = $1", job_id,
+                        )
+                    else:
+                        cursor = await conn.execute(
+                            "SELECT 1 FROM user_jobs WHERE job_id = ?", (job_id,),
+                        )
+                        used = cursor.fetchone()
+                    if not used:
+                        if _is_pg:
+                            await conn.execute("DELETE FROM job_roles WHERE id = $1", job_id)
+                        else:
+                            await conn.execute("DELETE FROM job_roles WHERE id = ?", (job_id,))
+
         if not _is_pg:
             await conn.commit()
     finally:
@@ -1453,12 +1428,20 @@ async def get_job_request(request_id: int) -> dict | None:
         await conn.close()
 
 
+UNIQUE_JOBS = {"Мэр", "Прокурор"}
+
 async def approve_job_request(request_id: int) -> bool:
     conn = await get_conn()
     try:
         req = await get_job_request(request_id)
         if not req or req["status"] != "pending":
             return False
+
+        if req["job_name"] in UNIQUE_JOBS:
+            existing = await get_job_holder_info(req["chat_id"], req["job_name"])
+            if existing:
+                return False
+
         if _is_pg:
             await conn.execute(
                 "DELETE FROM user_jobs WHERE telegram_id = $1 AND chat_id = $2",
@@ -1477,6 +1460,127 @@ async def approve_job_request(request_id: int) -> bool:
             await conn.execute("UPDATE job_requests SET status = 'approved' WHERE id = ?", (request_id,))
             await conn.commit()
         return True
+    finally:
+        await conn.close()
+
+
+# ── Player-to-player vehicle marketplace ────────────────────
+
+async def list_vehicle_for_sale(vehicle_id: int, telegram_id: int, price: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' FOR UPDATE",
+                vehicle_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET status = 'player_listed', price = $1 WHERE id = $2",
+                price, vehicle_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'",
+                (vehicle_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET status = 'player_listed', price = ? WHERE id = ?",
+                (price, vehicle_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def unlist_vehicle(vehicle_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'player_listed' FOR UPDATE",
+                vehicle_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET status = 'sold' WHERE id = $1", vehicle_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'player_listed'",
+                (vehicle_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET status = 'sold' WHERE id = ?", (vehicle_id,),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def buy_player_vehicle(vehicle_id: int, buyer_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND status = 'player_listed' FOR UPDATE",
+                vehicle_id,
+            )
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
+                buyer_id, vehicle_id,
+            )
+            return seller_id, price
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND status = 'player_listed'", (vehicle_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
+                (buyer_id, vehicle_id),
+            )
+            await conn.commit()
+            return seller_id, price
+    finally:
+        await conn.close()
+
+
+async def get_player_listed_vehicles(chat_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM vehicles WHERE status = 'player_listed' AND chat_id = $1 ORDER BY created_at DESC",
+                chat_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE status = 'player_listed' AND chat_id = ? ORDER BY created_at DESC",
+                (chat_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
 
