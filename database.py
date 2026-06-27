@@ -1742,6 +1742,19 @@ async def sell_vehicle(vehicle_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
+async def get_all_owned_vehicles() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id IS NOT NULL ORDER BY id ASC")
+        else:
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id IS NOT NULL ORDER BY id ASC")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 async def get_all_vehicles_by_owner(telegram_id: int) -> list:
     conn = await get_conn()
     try:

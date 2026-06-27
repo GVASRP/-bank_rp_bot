@@ -23,6 +23,7 @@ from database import (
     create_house,
     get_house,
     get_all_vehicles_by_owner,
+    get_all_owned_vehicles,
     admin_take_vehicle,
     admin_give_vehicle,
     clear_user_vehicles,
@@ -668,6 +669,26 @@ async def cmd_give_car(message: Message):
         await message.reply(f"❌ Ошибка выдачи")
         return
     await message.reply(f"✅ Авто #{vid} {v['year']} {v['make']} {v['model']} выдано пользователю {parts[1]}")
+
+
+@router.message(Command("все_авто", prefix="!/"))
+async def cmd_all_cars(message: Message):
+    if not await ensure_admin(message):
+        return
+    vehicles = await get_all_owned_vehicles()
+    if not vehicles:
+        await message.reply("📭 Нет купленных автомобилей")
+        return
+    lines = [f"🚗 <b>Все купленные авто ({len(vehicles)} шт.):</b>\n"]
+    for v in vehicles:
+        owner = await get_user_by_telegram_id(v["owner_telegram_id"])
+        owner_name = get_user_display(owner) if owner else "Неизвестно"
+        status = "🔄 в продаже" if v["status"] == "player_listed" else "✅"
+        lines.append(
+            f"#{v['id']} {v['year']} {v['make']} {v['model']}\n"
+            f"   👤 {owner_name} | {status}"
+        )
+    await message.reply("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("очистить_авто", prefix="!/"))
