@@ -130,7 +130,7 @@ def calc_deposit_payout(deposit: dict) -> tuple:
         days_held = delta.total_seconds() / 86400
         if days_held < 1:
             days_held = 1
-        interest = int(deposit["amount"] * deposit["interest_rate"] * days_held / 36500)
+        interest = int(deposit["amount"] * deposit["interest_rate"] * days_held / 100)
     except (ValueError, KeyError):
         interest = 0
     payout = deposit["amount"] + interest
@@ -144,7 +144,7 @@ def calc_credit_debt(credit: dict) -> dict:
         days_held = delta.total_seconds() / 86400
         if days_held < 1:
             days_held = 1
-        total_interest = int(credit["amount"] * credit["interest_rate"] * days_held / 36500)
+        total_interest = int(credit["amount"] * credit["interest_rate"] * days_held / 100)
     except (ValueError, KeyError):
         total_interest = 0
     interest_paid = credit.get("interest_paid", 0)

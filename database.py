@@ -77,7 +77,7 @@ async def init_db():
                 user_telegram_id BIGINT NOT NULL,
                 amount INTEGER NOT NULL,
                 remaining_principal INTEGER NOT NULL,
-                interest_rate INTEGER DEFAULT 10,
+                interest_rate REAL DEFAULT 1.0,
                 interest_paid INTEGER DEFAULT 0,
                 duration_days INTEGER DEFAULT 30,
                 status TEXT DEFAULT 'active',
@@ -99,6 +99,20 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
             except Exception:
                 pass
+        # Migrate interest_rate from annual INTEGER to daily REAL
+        for table in ("deposits", "credits"):
+            try:
+                await conn.execute(f"ALTER TABLE {table} ALTER COLUMN interest_rate TYPE REAL")
+            except Exception:
+                pass
+        try:
+            await conn.execute("UPDATE deposits SET interest_rate = interest_rate / 365.0 WHERE interest_rate > 10")
+        except Exception:
+            pass
+        try:
+            await conn.execute("UPDATE credits SET interest_rate = interest_rate / 365.0 WHERE interest_rate > 30")
+        except Exception:
+            pass
         for col in (("chat_id", "BIGINT DEFAULT 0"),):
             try:
                 await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col[0]} {col[1]}")
@@ -167,7 +181,7 @@ async def init_db():
                 id SERIAL PRIMARY KEY,
                 user_telegram_id BIGINT NOT NULL,
                 amount INTEGER NOT NULL,
-                interest_rate INTEGER DEFAULT 5,
+                interest_rate REAL DEFAULT 0.5,
                 status TEXT DEFAULT 'active',
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
@@ -246,7 +260,7 @@ async def init_db():
                     user_telegram_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
                     remaining_principal INTEGER NOT NULL,
-                    interest_rate INTEGER DEFAULT 10,
+                    interest_rate REAL DEFAULT 1.0,
                     interest_paid INTEGER DEFAULT 0,
                     duration_days INTEGER DEFAULT 30,
                     status TEXT DEFAULT 'active',
@@ -296,7 +310,7 @@ async def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_telegram_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
-                    interest_rate INTEGER DEFAULT 5,
+                    interest_rate REAL DEFAULT 0.5,
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );

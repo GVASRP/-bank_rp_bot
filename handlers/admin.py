@@ -383,7 +383,7 @@ async def cmd_all_credits(message: Message):
         info = calc_credit_debt(c)
         lines.append(
             f"#{c['id']} — {name}\n"
-            f"   Выдано: {format_amount(c['amount'])} | {c['interest_rate']}%/год | {c['duration_days']}д\n"
+            f"   Выдано: {format_amount(c['amount'])} | {c['interest_rate']}%/день | {c['duration_days']}д\n"
             f"   Тело: {format_amount(info['remaining_principal'])} | %: +{format_amount(info['interest_due'])}\n"
             f"   Долг: <b>{format_amount(info['total_debt'])}</b>"
         )
@@ -408,7 +408,7 @@ async def cmd_all_deposits(message: Message):
         payout, interest = calc_deposit_payout(d)
         lines.append(
             f"#{d['id']} — {name}\n"
-            f"   Сумма: {format_amount(d['amount'])} | %: {d['interest_rate']}%/год\n"
+            f"   Сумма: {format_amount(d['amount'])} | %: {d['interest_rate']}%/день\n"
             f"   Начислено: +{format_amount(interest)} | К выплате: <b>{format_amount(payout)}</b>"
         )
 

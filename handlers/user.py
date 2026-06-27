@@ -195,11 +195,12 @@ async def cmd_my_credits(message: Message):
     lines = ["💳 <b>Ваши кредиты:</b>\n"]
     for c in credits:
         info = calc_credit_debt(c)
+        daily = int(c["amount"] * c["interest_rate"] / 100)
         lines.append(
-            f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов | {c['interest_rate']}%/год\n"
+            f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов | {c['interest_rate']}%/день\n"
             f"   Срок: {c['duration_days']} дн. | Остаток тела: {format_amount(info['remaining_principal'])}\n"
             f"   % начислено: +{format_amount(info['total_interest'])} | Оплачено: {format_amount(info['interest_paid'])}\n"
-            f"   Долг на сейчас: <b>{format_amount(info['total_debt'])}</b>"
+            f"   Долг на сейчас: <b>{format_amount(info['total_debt'])}</b> | {format_amount(daily)}/день"
         )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
@@ -279,12 +280,12 @@ async def cmd_my_deposits(message: Message):
     lines = ["🏛 <b>Ваши вклады:</b>\n"]
     for d in deposits:
         payout, interest = calc_deposit_payout(d)
+        daily = int(d["amount"] * d["interest_rate"] / 100)
         lines.append(
             f"#{d['id']} — <b>{format_amount(d['amount'])}</b> долларов\n"
-            f"   Ставка: {d['interest_rate']}%/год | Начислено: +{format_amount(interest)}\n"
-            f"   Текущая сумма: <b>{format_amount(payout)}</b>"
+            f"   Ставка: {d['interest_rate']}%/день | +{format_amount(daily)}/день\n"
+            f"   Начислено: +{format_amount(interest)} | Текущая: <b>{format_amount(payout)}</b>"
         )
-
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
