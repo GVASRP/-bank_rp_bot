@@ -189,6 +189,16 @@ async def init_db():
                 UNIQUE(telegram_id, chat_id)
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS job_requests (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL DEFAULT 0,
+                job_id INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
         await conn.execute("DROP TABLE IF EXISTS user_salary")
         try:
             await conn.execute("ALTER TABLE user_jobs ADD COLUMN IF NOT EXISTS last_payout TIMESTAMP")
@@ -300,6 +310,14 @@ async def init_db():
                     job_id INTEGER NOT NULL REFERENCES job_roles(id),
                     last_payout TEXT,
                     UNIQUE(telegram_id, chat_id)
+                );
+                CREATE TABLE IF NOT EXISTS job_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    job_id INTEGER NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 DROP TABLE IF EXISTS user_salary;
             """)
@@ -1113,10 +1131,7 @@ JOB_CATEGORIES = {
     "Дальнобойщик": "civilian",
     "Фермер": "civilian",
     "Строитель": "civilian",
-    "Рабочий завода": "civilian",
     "Банкир": "civilian",
-    "Риелтор": "civilian",
-    "Предприниматель": "civilian",
     # Criminal
     "Вор": "criminal",
     "Угонщик": "criminal",
@@ -1160,11 +1175,7 @@ DEFAULT_JOBS = [
     # Blue Collar
     ("Фермер", 1500),
     ("Строитель", 1500),
-    ("Рабочий завода", 1200),
-    # White Collar
     ("Банкир", 2800),
-    ("Риелтор", 2000),
-    ("Предприниматель", 3000),
     # Criminal
     ("Вор", 2200),
     ("Угонщик", 2400),
@@ -1300,6 +1311,158 @@ async def remove_user_job(telegram_id: int, chat_id: int) -> None:
         else:
             await conn.execute("DELETE FROM user_jobs WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
             await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def create_job_request(telegram_id: int, chat_id: int, job_id: int) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO job_requests (telegram_id, chat_id, job_id) VALUES ($1, $2, $3) RETURNING id",
+                telegram_id, chat_id, job_id,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO job_requests (telegram_id, chat_id, job_id) VALUES (?, ?, ?)",
+                (telegram_id, chat_id, job_id),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        await conn.close()
+
+
+async def get_pending_job_requests(chat_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT r.*, j.name as job_name, j.salary FROM job_requests r "
+                "JOIN job_roles j ON j.id = r.job_id "
+                "WHERE r.chat_id = $1 AND r.status = 'pending' ORDER BY r.created_at",
+                chat_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT r.*, j.name as job_name, j.salary FROM job_requests r "
+                "JOIN job_roles j ON j.id = r.job_id "
+                "WHERE r.chat_id = ? AND r.status = 'pending' ORDER BY r.created_at",
+                (chat_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_job_request(request_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT r.*, j.name as job_name, j.salary FROM job_requests r "
+                "JOIN job_roles j ON j.id = r.job_id WHERE r.id = $1", request_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT r.*, j.name as job_name, j.salary FROM job_requests r "
+                "JOIN job_roles j ON j.id = r.job_id WHERE r.id = ?", (request_id,),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def approve_job_request(request_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        req = await get_job_request(request_id)
+        if not req or req["status"] != "pending":
+            return False
+        if _is_pg:
+            await conn.execute(
+                "DELETE FROM user_jobs WHERE telegram_id = $1 AND chat_id = $2",
+                req["telegram_id"], req["chat_id"],
+            )
+            await conn.execute(
+                "INSERT INTO user_jobs (telegram_id, chat_id, job_id) VALUES ($1, $2, $3)",
+                req["telegram_id"], req["chat_id"], req["job_id"],
+            )
+            await conn.execute("UPDATE job_requests SET status = 'approved' WHERE id = $1", request_id)
+        else:
+            await conn.execute("DELETE FROM user_jobs WHERE telegram_id = ? AND chat_id = ?",
+                               (req["telegram_id"], req["chat_id"]))
+            await conn.execute("INSERT INTO user_jobs (telegram_id, chat_id, job_id) VALUES (?, ?, ?)",
+                               (req["telegram_id"], req["chat_id"], req["job_id"]))
+            await conn.execute("UPDATE job_requests SET status = 'approved' WHERE id = ?", (request_id,))
+            await conn.commit()
+        return True
+    finally:
+        await conn.close()
+
+
+async def reject_job_request(request_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("UPDATE job_requests SET status = 'rejected' WHERE id = $1 AND status = 'pending'", request_id)
+            return "UPDATE 1" in (result or "")
+        else:
+            cursor = await conn.execute("UPDATE job_requests SET status = 'rejected' WHERE id = ? AND status = 'pending'", (request_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def is_mayor_taken(chat_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        job_id_q = "SELECT id FROM job_roles WHERE chat_id = $1 AND name = $2" if _is_pg else \
+                   "SELECT id FROM job_roles WHERE chat_id = ? AND name = ?"
+        if _is_pg:
+            row = await conn.fetchrow(job_id_q, chat_id, "Мэр")
+        else:
+            cursor = await conn.execute(job_id_q, (chat_id, "Мэр"))
+            row = await cursor.fetchone()
+        if not row:
+            return False
+        mayor_job_id = row["id"]
+        if _is_pg:
+            r = await conn.fetchrow(
+                "SELECT 1 FROM user_jobs WHERE chat_id = $1 AND job_id = $2", chat_id, mayor_job_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT 1 FROM user_jobs WHERE chat_id = ? AND job_id = ?", (chat_id, mayor_job_id),
+            )
+            r = await cursor.fetchone()
+        return r is not None
+    finally:
+        await conn.close()
+
+
+async def get_job_holder_info(chat_id: int, job_name: str) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT uj.*, j.name as job_name, j.salary FROM user_jobs uj "
+                "JOIN job_roles j ON j.id = uj.job_id "
+                "WHERE uj.chat_id = $1 AND j.name = $2", chat_id, job_name,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT uj.*, j.name as job_name, j.salary FROM user_jobs uj "
+                "JOIN job_roles j ON j.id = uj.job_id "
+                "WHERE uj.chat_id = ? AND j.name = ?", (chat_id, job_name),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
     finally:
         await conn.close()
 

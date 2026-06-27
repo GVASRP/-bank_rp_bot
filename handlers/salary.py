@@ -13,6 +13,11 @@ from database import (
     set_user_job,
     get_user_job_info,
     remove_user_job,
+    create_job_request,
+    get_pending_job_requests,
+    approve_job_request,
+    reject_job_request,
+    is_mayor_taken,
     update_balance,
     add_transaction,
 )
@@ -107,8 +112,8 @@ async def cmd_jobs(message: Message):
         for j in criminal:
             lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
         lines.append("")
-    lines.append("💡 <code>!устроиться Название</code> — выбрать профессию")
-    lines.append("💡 Зарплата выплачивается админом после сессии: <code>!зп @users</code>")
+    lines.append("💡 <code>!устроиться Название</code> — подать заявку")
+    lines.append("💡 Зарплату выплачивает админ после сессии: <code>!зп @users</code>")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
@@ -128,10 +133,17 @@ async def cmd_take_job(message: Message):
     if not job:
         await message.reply(f"❌ Профессия \"{job_name}\" не найдена. Список: <code>!работа</code>", parse_mode="HTML")
         return
+
+    if job["name"] == "Мэр":
+        taken = await is_mayor_taken(message.chat.id)
+        if taken:
+            await message.reply("❌ Должность мэра уже занята. Дождитесь, пока текущий мэр покинет пост.")
+            return
+
     await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, chat_id=message.chat.id)
-    await set_user_job(message.from_user.id, message.chat.id, job["id"])
+    req_id = await create_job_request(message.from_user.id, message.chat.id, job["id"])
     await message.reply(
-        f"✅ Вы устроились <b>{job['name']}</b>! Оклад: {format_amount(job['salary'])} $",
+        f"✅ Заявка <b>№{req_id}</b> на должность \"{job['name']}\" отправлена админам!",
         parse_mode="HTML",
     )
 
@@ -166,6 +178,84 @@ async def cmd_quit_job(message: Message):
         return
     await remove_user_job(message.from_user.id, message.chat.id)
     await message.reply(f"✅ Вы уволились с должности \"{job['name']}\"", parse_mode="HTML")
+
+
+@router.message(Command("уволить", prefix="!/"))
+async def cmd_fire(message: Message):
+    if message.chat.type in ("group", "supergroup") and not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!уволить @username</code>", parse_mode="HTML")
+        return
+    target_id, target_name, target_username, hint = await resolve_target(message, [args[1], args[1]])
+    if not target_id:
+        await message.reply("❌ Пользователь не найден")
+        return
+    job = await get_user_job_info(target_id, message.chat.id)
+    if not job:
+        await message.reply(f"❌ {target_name} и так безработный")
+        return
+    await remove_user_job(target_id, message.chat.id)
+    await message.reply(f"✅ {target_name} уволен с должности \"{job['name']}\"", parse_mode="HTML")
+
+
+@router.message(Command("заявки_на_работу", prefix="!/"))
+async def cmd_list_requests(message: Message):
+    if message.chat.type in ("group", "supergroup") and not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    reqs = await get_pending_job_requests(message.chat.id)
+    if not reqs:
+        await message.reply("📭 Нет pending заявок на работу")
+        return
+    lines = ["📋 <b>Заявки на работу:</b>\n"]
+    for r in reqs:
+        lines.append(f"  <b>#{r['id']}</b> — {r['telegram_id']} → {r['job_name']} ({format_amount(r['salary'])} $)")
+    lines.append("\n💡 <code>!принять_на_работу ID</code> — одобрить")
+    lines.append("💡 <code>!отказать_на_работу ID</code> — отклонить")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("принять_на_работу", prefix="!/"))
+async def cmd_approve_request(message: Message):
+    if message.chat.type in ("group", "supergroup") and not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    args = message.text.split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!принять_на_работу ID</code>", parse_mode="HTML")
+        return
+    req_id = parse_amount(args[1])
+    if not req_id:
+        await message.reply("❌ Укажите номер заявки")
+        return
+    ok = await approve_job_request(req_id)
+    if not ok:
+        await message.reply(f"❌ Заявка #{req_id} не найдена или уже обработана")
+        return
+    await message.reply(f"✅ Заявка #{req_id} одобрена! Пользователь принят на работу.", parse_mode="HTML")
+
+
+@router.message(Command("отказать_на_работу", prefix="!/"))
+async def cmd_reject_request(message: Message):
+    if message.chat.type in ("group", "supergroup") and not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    args = message.text.split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!отказать_на_работу ID</code>", parse_mode="HTML")
+        return
+    req_id = parse_amount(args[1])
+    if not req_id:
+        await message.reply("❌ Укажите номер заявки")
+        return
+    ok = await reject_job_request(req_id)
+    if not ok:
+        await message.reply(f"❌ Заявка #{req_id} не найдена или уже обработана")
+        return
+    await message.reply(f"✅ Заявка #{req_id} отклонена.", parse_mode="HTML")
 
 
 @router.message(Command("изменить_зп", prefix="!/"))
