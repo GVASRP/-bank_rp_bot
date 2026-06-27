@@ -1,7 +1,6 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-import random
 import time
 
 from database import (
@@ -59,7 +58,6 @@ DELIVERY_GOODS = [
 ]
 
 _last_delivery = {}
-_last_crime = {}
 
 
 @router.message(Command("работа", prefix="!/"))
@@ -158,14 +156,9 @@ async def cmd_my_job(message: Message):
     if not job:
         await message.reply("💼 Вы пока безработный. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
         return
-    cat = get_job_category(job["name"])
     extra = ""
-    if cat in CRIME_CATEGORIES:
-        extra = "\n💀 <code>!дело</code> — провернуть криминальное дело (в сессии)"
-    elif cat in LAW_CATEGORIES:
-        extra = "\n🔍 <code>!расследование</code> — провести расследование (в сессии)"
     if job["name"] in DELIVERY_JOBS:
-        extra += "\n🚛 <code>!доставка</code> — совершить доставку"
+        extra = "\n🚛 <code>!доставка</code> — совершить доставку"
     await message.reply(
         f"💼 <b>Ваша профессия:</b> {job['name']}\n"
         f"💰 <b>Оклад:</b> {format_amount(job['salary'])} $\n"
@@ -343,87 +336,7 @@ async def cmd_pay_salary(message: Message):
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("дело", prefix="!/"))
-async def cmd_crime(message: Message):
-    job = await get_user_job_info(message.from_user.id, message.chat.id)
-    if not job:
-        await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
-        return
-    cat = get_job_category(job["name"])
-    if cat not in CRIME_CATEGORIES:
-        await message.reply("❌ Эта команда только для криминальных профессий")
-        return
 
-    now = time.time()
-    last = _last_crime.get(message.from_user.id, 0)
-    if now - last < 120:
-        left = int(120 - (now - last))
-        await message.reply(f"⏳ Подождите {left} сек перед следующим делом")
-        return
-    _last_crime[message.from_user.id] = now
-
-    crime_scenarios = [
-        f"Вы проникли в банк Wisconsin Trust через подвал. Взломали сейф и забрали наличные.",
-        f"Угнали BMW (BKM) с парковки у Walmart. Тачку уже разобрали на запчасти в порту.",
-        f"Перехватили груз фур на трассе I-41. Товар перегрузили на склад №12.",
-        f"Взломали сервер мэрии Гринвилл и скачали закрытые документы. Продали информацию.",
-        f"Организовали подпольное казино в отеле Greenville Inn. Налёт принёс прибыль.",
-        f"Переправили контрабанду через Порт Гринвилл. Таможня ничего не заметила.",
-        f"Обчистили дом мэра на Озёрной улице. Забрали украшения и наличку.",
-        f"Напоили охранника на заправке BP и украли кассу.",
-    ]
-
-    roll = random.randint(1, 100)
-    success = roll <= 50
-    scenario = random.choice(crime_scenarios)
-    lines = [f"💀 <b>Криминальное дело</b>\n"]
-    lines.append(f"📋 {scenario}")
-    if success:
-        lines.append(f"\n✅ <b>Успех!</b> Вы остались незамеченным.")
-    else:
-        lines.append(f"\n❌ <b>Провал!</b> Пришлось заметать следы. В этот раз не вышло.")
-    await message.reply("\n".join(lines), parse_mode="HTML")
-
-
-@router.message(Command("расследование", prefix="!/"))
-async def cmd_investigate(message: Message):
-    job = await get_user_job_info(message.from_user.id, message.chat.id)
-    if not job:
-        await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
-        return
-    cat = get_job_category(job["name"])
-    if cat not in LAW_CATEGORIES:
-        await message.reply("❌ Эта команда только для правоохранителей и юристов")
-        return
-
-    invest_scenarios = [
-        f"Осмотрели место преступления на складе №12. Нашли отпечатки и гильзы.",
-        f"Допросили свидетелей у ресторана \"У озера\". Кто-то видел подозрительный фургон.",
-        f"Проверили камеры у банка Wisconsin Trust. Засветился угнанный пикап Durant.",
-        f"Устроили облаву в порту Гринвилл. Изъяли партию контрабанды.",
-        f"Проанализировали цифровые следы — хакер оставил лог на сервере мэрии.",
-        f"Проверили алиби подозреваемого. Он был в баре — чисто.",
-        f"Нашли схрон оружия в лесу за фермой Джонсона.",
-        f"Закрыли подпольную мастерскую по перебивке VIN-номеров.",
-    ]
-    outcome_scenarios = [
-        f"Преступник задержан и передан в суд!",
-        f"Улики собраны, дело готово к передаче прокурору.",
-        f"Обвиняемый сознался под давлением улик.",
-        f"Судья вынес приговор — преступник отправлен в тюрьму.",
-    ]
-
-    roll = random.randint(1, 100)
-    success = roll <= 55
-    scenario = random.choice(invest_scenarios)
-    outcome = random.choice(outcome_scenarios)
-    lines = [f"🔍 <b>Расследование</b>\n"]
-    lines.append(f"📋 {scenario}")
-    if success:
-        lines.append(f"\n✅ {outcome}")
-    else:
-        lines.append(f"\n❌ Недостаточно улик. Дело приостановлено.")
-    await message.reply("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("доставка", prefix="!/"))
