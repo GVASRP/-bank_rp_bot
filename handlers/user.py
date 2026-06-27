@@ -9,6 +9,7 @@ from database import (
     get_transactions,
     get_all_users_ranked,
     create_credit_request,
+    create_deposit_request,
     get_user_credits,
     get_credit_by_id,
     repay_credit,
