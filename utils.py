@@ -90,7 +90,7 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
         for entity in message.entities:
             if entity.type == "mention":
                 mention_text = message.text[entity.offset:entity.offset + entity.length]
-                entity_username = mention_text.lstrip("@")
+                entity_username = mention_text.lstrip("@").lower()
                 if entity_username == username:
                     continue  # already processed this username above
                 user = await get_user_by_username(entity_username, chat_id)
