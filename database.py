@@ -170,6 +170,25 @@ async def init_db():
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS job_roles (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL DEFAULT 0,
+                name TEXT NOT NULL,
+                salary INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(chat_id, name)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_jobs (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL DEFAULT 0,
+                job_id INTEGER NOT NULL REFERENCES job_roles(id),
+                UNIQUE(telegram_id, chat_id)
+            )
+        """)
+        await conn.execute("DROP TABLE IF EXISTS user_salary")
     else:
         conn = await get_conn()
         try:
@@ -262,6 +281,21 @@ async def init_db():
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
+                CREATE TABLE IF NOT EXISTS job_roles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    name TEXT NOT NULL,
+                    salary INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(chat_id, name)
+                );
+                CREATE TABLE IF NOT EXISTS user_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    job_id INTEGER NOT NULL REFERENCES job_roles(id),
+                    UNIQUE(telegram_id, chat_id)
+                );
+                DROP TABLE IF EXISTS user_salary;
             """)
             await conn.commit()
             # Migration: add chat_id column if missing
@@ -300,62 +334,7 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
-            # Migration: job_roles table
-            try:
-                if _is_pg:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS job_roles (
-                            id SERIAL PRIMARY KEY,
-                            chat_id BIGINT NOT NULL DEFAULT 0,
-                            name TEXT NOT NULL,
-                            salary INTEGER NOT NULL DEFAULT 0,
-                            UNIQUE(chat_id, name)
-                        )
-                    """)
-                else:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS job_roles (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            chat_id INTEGER NOT NULL DEFAULT 0,
-                            name TEXT NOT NULL,
-                            salary INTEGER NOT NULL DEFAULT 0,
-                            UNIQUE(chat_id, name)
-                        )
-                    """)
-                await conn.commit()
-            except Exception:
-                pass
-            # Migration: user_jobs table
-            try:
-                if _is_pg:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS user_jobs (
-                            id SERIAL PRIMARY KEY,
-                            telegram_id BIGINT NOT NULL,
-                            chat_id BIGINT NOT NULL DEFAULT 0,
-                            job_id INTEGER NOT NULL REFERENCES job_roles(id),
-                            UNIQUE(telegram_id, chat_id)
-                        )
-                    """)
-                else:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS user_jobs (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            telegram_id INTEGER NOT NULL,
-                            chat_id INTEGER NOT NULL DEFAULT 0,
-                            job_id INTEGER NOT NULL REFERENCES job_roles(id),
-                            UNIQUE(telegram_id, chat_id)
-                        )
-                    """)
-                await conn.commit()
-            except Exception:
-                pass
-            # Drop old user_salary table if exists
-            try:
-                await conn.execute("DROP TABLE IF EXISTS user_salary")
-                await conn.commit()
-            except Exception:
-                pass
+
         finally:
             await conn.close()
 
