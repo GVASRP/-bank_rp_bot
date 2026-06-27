@@ -98,6 +98,11 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
             except Exception:
                 pass
+        for col in (("chat_id", "BIGINT DEFAULT 0"),):
+            try:
+                await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col[0]} {col[1]}")
+            except Exception:
+                pass
         # Remove old UNIQUE on telegram_id, add composite UNIQUE for per-group balances
         for cname in ["users_telegram_id_key", "uq_users_telegram_id"]:
             try:
@@ -288,6 +293,12 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
+            # Migration: add chat_id to vehicles
+            try:
+                await conn.execute("ALTER TABLE vehicles ADD COLUMN chat_id INTEGER DEFAULT 0")
+                await conn.commit()
+            except Exception:
+                pass
         finally:
             await conn.close()
 
@@ -299,7 +310,7 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
             row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
             if not row:
                 start_raw = await conn.fetchrow("SELECT value FROM config WHERE key = 'start_balance'")
-                start_balance = int(start_raw["value"]) if start_raw else 0
+                start_balance = int(start_raw["value"]) if start_raw else 1000
                 row = await conn.fetchrow(
                     "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
                     telegram_id, username, first_name, start_balance, chat_id,
@@ -317,7 +328,7 @@ async def get_or_create_user(telegram_id: int, username: Optional[str] = None, f
             if not user:
                 cursor2 = await conn.execute("SELECT value FROM config WHERE key = 'start_balance'")
                 start_raw = await cursor2.fetchone()
-                start_balance = int(start_raw["value"]) if start_raw else 0
+                start_balance = int(start_raw["value"]) if start_raw else 1000
                 await conn.execute(
                     "INSERT INTO users (telegram_id, username, first_name, balance, chat_id) VALUES (?, ?, ?, ?, ?)",
                     (telegram_id, username, first_name, start_balance, chat_id),
@@ -870,21 +881,21 @@ async def set_config(key: str, value: str) -> None:
 
 async def create_vehicle(make: str, model: str, year: int, price: int, miles: int,
                          city: str, vin: str, license_plate: str,
-                         color: str = "", rarity: str = "common") -> int:
+                         color: str = "", rarity: str = "common", chat_id: int = 0) -> int:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate, color, rarity) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
-                make, model, year, price, miles, city, vin, license_plate, color, rarity,
+                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
+                make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate, color, rarity) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (make, model, year, price, miles, city, vin, license_plate, color, rarity),
+                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id),
             )
             await conn.commit()
             return cursor.lastrowid
@@ -906,13 +917,19 @@ async def get_vehicle(vehicle_id: int) -> dict | None:
         await conn.close()
 
 
-async def get_available_vehicles() -> list:
+async def get_available_vehicles(chat_id: int | None = None) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
+            if chat_id is not None:
+                rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' AND chat_id = $1 ORDER BY created_at DESC", chat_id)
+            else:
+                rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
         else:
-            cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
+            if chat_id is not None:
+                cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' AND chat_id = ? ORDER BY created_at DESC", (chat_id,))
+            else:
+                cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -930,6 +947,54 @@ async def get_user_vehicles(telegram_id: int) -> list:
         return [dict(r) for r in rows]
     finally:
         await conn.close()
+
+
+async def cleanup_orphan_vehicles() -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("DELETE FROM vehicles WHERE chat_id = 0 AND status = 'available'")
+            count = int(result.split()[-1]) if result else 0
+        else:
+            cursor = await conn.execute("DELETE FROM vehicles WHERE chat_id = 0 AND status = 'available'")
+            await conn.commit()
+            count = cursor.rowcount
+        return count
+    finally:
+        await conn.close()
+
+
+async def get_chat_stats(chat_id: int) -> dict:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE chat_id = $1", chat_id)
+            total_bal = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE chat_id = $1", chat_id)
+            cars = await conn.fetchval("SELECT COUNT(*) FROM vehicles WHERE chat_id = $1 AND status = 'available'", chat_id)
+            houses = await conn.fetchval("SELECT COUNT(*) FROM houses WHERE status = 'available'")
+        else:
+            cursor = await conn.execute("SELECT COUNT(*) FROM users WHERE chat_id = ?", (chat_id,))
+            row = await cursor.fetchone()
+            users = row[0] if row else 0
+            cursor = await conn.execute("SELECT COALESCE(SUM(balance), 0) FROM users WHERE chat_id = ?", (chat_id,))
+            row = await cursor.fetchone()
+            total_bal = row[0] if row else 0
+            cursor = await conn.execute("SELECT COUNT(*) FROM vehicles WHERE chat_id = ? AND status = 'available'", (chat_id,))
+            row = await cursor.fetchone()
+            cars = row[0] if row else 0
+            cursor = await conn.execute("SELECT COUNT(*) FROM houses WHERE status = 'available'")
+            row = await cursor.fetchone()
+            houses = row[0] if row else 0
+        return {"users": users, "total_balance": total_bal, "available_cars": cars, "available_houses": houses}
+    finally:
+        await conn.close()
+
+
+async def get_vehicle_by_position(chat_id: int, position: int) -> dict | None:
+    vehicles = await get_available_vehicles(chat_id=chat_id)
+    if position < 1 or position > len(vehicles):
+        return None
+    return vehicles[position - 1]
 
 
 async def buy_vehicle(vehicle_id: int, telegram_id: int) -> bool:

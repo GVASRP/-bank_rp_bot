@@ -197,7 +197,7 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
-        car["color"], car["rarity"],
+        car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])
@@ -239,7 +239,7 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
-        car["color"], car["rarity"],
+        car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
     image = await fetch_car_image(car["make"], car["model"])

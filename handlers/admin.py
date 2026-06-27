@@ -28,6 +28,9 @@ from database import (
     clear_posted_listings,
     clear_available_vehicles,
     reset_all_balances,
+    cleanup_orphan_vehicles,
+    get_chat_stats,
+    get_all_users_ranked,
 )
 from auto_poster import force_post_one
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
@@ -683,7 +686,7 @@ async def cmd_start_balance(message: Message):
         return
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        current = await get_config("start_balance") or "0"
+        current = await get_config("start_balance") or "1000"
         await message.reply(f"💰 Стартовый баланс: <b>{format_amount(int(current))}</b> долларов\n"
                             f"Использование: <code>!стартовый_баланс сумма</code>", parse_mode="HTML")
         return
@@ -700,10 +703,57 @@ async def cmd_start_balance(message: Message):
 async def cmd_reset_balances(message: Message):
     if not await ensure_admin(message):
         return
-    await message.reply("⚠️ Это сбросит ВСЕ балансы в 0. Продолжить? (да/нет)")
-    # simple confirmation: next message from same user checks for "да"
-    # for simplicity, we just reset without confirmation
-    count = await reset_all_balances(chat_id=message.chat.id, new_balance=0)
-    await message.reply(f"✅ Сброшено балансов: <b>{count}</b>\n"
-                        f"Новые пользователи будут получать стартовый баланс из <code>!стартовый_баланс</code>",
+    args = message.text.split(maxsplit=1)
+    amount = 0
+    if len(args) >= 2:
+        parsed = parse_amount(args[1])
+        if parsed is not None:
+            amount = parsed
+    count = await reset_all_balances(chat_id=message.chat.id, new_balance=amount)
+    await message.reply(f"✅ Сброшено балансов: <b>{count}</b> → {format_amount(amount)}\n"
+                        f"Новые пользователи будут получать: <code>!стартовый_баланс</code>",
                         parse_mode="HTML")
+
+
+@router.message(Command("обновить_имена", prefix="!/"))
+async def cmd_update_names(message: Message):
+    if not await ensure_admin(message):
+        return
+    users = await get_all_users_ranked(chat_id=message.chat.id)
+    updated = 0
+    for u in users:
+        if not u.get("first_name") and not u.get("username"):
+            try:
+                chat_member = await message.bot.get_chat_member(message.chat.id, u["telegram_id"])
+                user_info = chat_member.user
+                await get_or_create_user(u["telegram_id"], user_info.username, user_info.first_name, chat_id=message.chat.id)
+                updated += 1
+            except Exception:
+                pass
+    await message.reply(f"✅ Обновлено имён: <b>{updated}</b>", parse_mode="HTML")
+
+
+@router.message(Command("очистить_старые", prefix="!/"))
+async def cmd_cleanup_old(message: Message):
+    if not await ensure_admin(message):
+        return
+    count = await cleanup_orphan_vehicles()
+    await message.reply(f"🗑 Удалено старых машин: <b>{count}</b>", parse_mode="HTML")
+
+
+@router.message(Command("статистика", prefix="!/"))
+async def cmd_stats(message: Message):
+    stats = await get_chat_stats(message.chat.id)
+    top = await get_all_users_ranked(chat_id=message.chat.id, limit=3)
+    top_lines = []
+    for i, u in enumerate(top, 1):
+        top_lines.append(f"{i}. {get_user_display(u)} — {format_amount(u['balance'])}")
+    await message.reply(
+        f"📊 <b>Статистика чата</b>\n"
+        f"👥 Пользователей: <b>{stats['users']}</b>\n"
+        f"💰 Общий баланс: <b>{format_amount(stats['total_balance'])}</b>\n"
+        f"🚗 Машин в продаже: <b>{stats['available_cars']}</b>\n"
+        f"🏠 Домов в продаже: <b>{stats['available_houses']}</b>\n"
+        f"🏆 <b>Топ-3:</b>\n" + "\n".join(top_lines),
+        parse_mode="HTML",
+    )
