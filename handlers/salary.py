@@ -17,7 +17,6 @@ from database import (
     get_pending_job_requests,
     approve_job_request,
     reject_job_request,
-    is_job_taken,
     get_all_users_with_jobs,
     update_balance,
     add_transaction,
@@ -27,8 +26,9 @@ from utils import format_amount, parse_amount, is_admin, resolve_target
 
 router = Router()
 
-LAW_CATEGORIES = {"law", "legal", "government"}
+LAW_CATEGORIES = {"law"}
 CRIME_CATEGORIES = {"criminal"}
+DELIVERY_JOBS = {"GVPS Worker", "Sahara Delivery Worker", "Hunty's Pizza Palace Worker", "Taxi Driver"}
 
 DELIVERY_LOCATIONS = [
     "Shell (ул. Главная, 142)",
@@ -71,15 +71,12 @@ async def cmd_jobs(message: Message):
         return
     civilian = []
     law = []
-    medical = []
     emergency = []
     criminal = []
     for j in jobs:
         cat = get_job_category(j["name"])
-        if cat == "law" or cat == "legal" or cat == "government":
+        if cat == "law":
             law.append(j)
-        elif cat == "medical":
-            medical.append(j)
         elif cat == "emergency":
             emergency.append(j)
         elif cat == "criminal":
@@ -88,13 +85,8 @@ async def cmd_jobs(message: Message):
             civilian.append(j)
 
     lines = ["💼 <b>Доступные профессии:</b>\n"]
-    if civilian:
-        lines.append("👔 <b>Гражданские:</b>")
-        for j in civilian:
-            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
-        lines.append("")
     if law:
-        lines.append("👮 <b>Правоохранители и юристы:</b>")
+        lines.append("👮 <b>Правоохранители:</b>")
         for j in law:
             lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
         lines.append("")
@@ -103,14 +95,14 @@ async def cmd_jobs(message: Message):
         for j in emergency:
             lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
         lines.append("")
-    if medical:
-        lines.append("🏥 <b>Медицина:</b>")
-        for j in medical:
-            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
-        lines.append("")
     if criminal:
         lines.append("💀 <b>Криминал:</b>")
         for j in criminal:
+            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
+        lines.append("")
+    if civilian:
+        lines.append("👔 <b>Гражданские:</b>")
+        for j in civilian:
             lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
         lines.append("")
     lines.append("💡 <code>!устроиться Название</code> — подать заявку")
@@ -138,12 +130,6 @@ async def cmd_take_job(message: Message):
         await message.reply(f"❌ Профессия \"{job_name}\" не найдена. Список: <code>!работа</code>", parse_mode="HTML")
         return
 
-    if job["name"] in ("Мэр", "Прокурор"):
-        taken = await is_job_taken(message.chat.id, job["name"])
-        if taken:
-            await message.reply(f"❌ Должность \"{job['name']}\" уже занята. Дождитесь, пока текущий сотрудник покинет пост.")
-            return
-
     await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, chat_id=message.chat.id)
     req_id = await create_job_request(message.from_user.id, message.chat.id, job["id"])
     await message.reply(
@@ -164,8 +150,8 @@ async def cmd_my_job(message: Message):
         extra = "\n💀 <code>!дело</code> — провернуть криминальное дело (в сессии)"
     elif cat in LAW_CATEGORIES:
         extra = "\n🔍 <code>!расследование</code> — провести расследование (в сессии)"
-    if job["name"] == "Дальнобойщик":
-        extra = "\n🚛 <code>!доставка</code> — совершить доставку между организациями"
+    if job["name"] in DELIVERY_JOBS:
+        extra = "\n🚛 <code>!доставка</code> — совершить доставку"
     await message.reply(
         f"💼 <b>Ваша профессия:</b> {job['name']}\n"
         f"💰 <b>Оклад:</b> {format_amount(job['salary'])} $\n"
@@ -432,7 +418,7 @@ async def cmd_delivery(message: Message):
     if not job:
         await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
         return
-    if job["name"] != "Дальнобойщик":
+    if job["name"] not in DELIVERY_JOBS:
         await message.reply("❌ Эта команда только для дальнобойщиков")
         return
 

@@ -530,19 +530,20 @@ def format_caption(car: dict, vehicle_id: int) -> str:
     rarity_line = f"\n{rarity_prefix}" if rarity_prefix else ""
     title = get_car_title(car["make"], car["model"])
     real_brand = get_real_brand(car["make"])
-    disclaimer = ""
+    lines = [
+        f"🚗 <b>{car['year']} {title}</b>",
+        f"📍 {car['city']}, WI",
+        f"💰 ${car['price']:,} | {car['miles']:,} миль",
+        f"🎨 {car['color']}",
+        f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}",
+    ]
     if car["make"] in LICENSED_BRANDS:
-        disclaimer = "\n✅ Лицензионный дилер"
-    elif real_brand and real_brand != "Fictional":
-        disclaimer = f"\n📸 {real_brand} {car['model']} (для примера)"
-    return (
-        f"🚗 <b>{car['year']} {title}</b>\n"
-        f"📍 {car['city']}, WI\n"
-        f"💰 ${car['price']:,} | {car['miles']:,} миль\n"
-        f"🎨 {car['color']}\n"
-        f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}{disclaimer}\n"
-        f"📝 {car['description']}"
-    )
+        lines.append("✅ Лицензионный дилер")
+    if real_brand and real_brand != "Fictional":
+        lines.append(f"📸 {real_brand} {car['model']} (фото для примера)")
+    else:
+        lines.append("📸 Фото для примера")
+    return "\n".join(lines)
 
 
 async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None = None) -> bool:
