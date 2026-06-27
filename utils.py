@@ -47,7 +47,11 @@ async def resolve_target(message: Message, args: list) -> tuple[int | None, str 
     if message.entities:
         for entity in message.entities:
             if entity.type == "text_mention":
-                return entity.user.id, entity.user.full_name, entity.user.username, ""
+                mention_text = message.text[entity.offset:entity.offset + entity.length]
+                text_username = mention_text.lstrip("@")
+                if text_username and (entity.user.username or "").lower() == text_username.lower():
+                    return entity.user.id, entity.user.full_name, entity.user.username, ""
+                continue
             if entity.type == "mention":
                 mention_text = message.text[entity.offset:entity.offset + entity.length]
                 username = mention_text.lstrip("@")
