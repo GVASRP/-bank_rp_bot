@@ -300,34 +300,59 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
-            # Migration: user_salary table
+            # Migration: job_roles table
             try:
                 if _is_pg:
                     await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS user_salary (
+                        CREATE TABLE IF NOT EXISTS job_roles (
+                            id SERIAL PRIMARY KEY,
+                            chat_id BIGINT NOT NULL DEFAULT 0,
+                            name TEXT NOT NULL,
+                            salary INTEGER NOT NULL DEFAULT 0,
+                            UNIQUE(chat_id, name)
+                        )
+                    """)
+                else:
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS job_roles (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            chat_id INTEGER NOT NULL DEFAULT 0,
+                            name TEXT NOT NULL,
+                            salary INTEGER NOT NULL DEFAULT 0,
+                            UNIQUE(chat_id, name)
+                        )
+                    """)
+                await conn.commit()
+            except Exception:
+                pass
+            # Migration: user_jobs table
+            try:
+                if _is_pg:
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS user_jobs (
                             id SERIAL PRIMARY KEY,
                             telegram_id BIGINT NOT NULL,
                             chat_id BIGINT NOT NULL DEFAULT 0,
-                            job_title TEXT NOT NULL DEFAULT '',
-                            salary INTEGER NOT NULL DEFAULT 0,
-                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            job_id INTEGER NOT NULL REFERENCES job_roles(id),
                             UNIQUE(telegram_id, chat_id)
                         )
                     """)
                 else:
                     await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS user_salary (
+                        CREATE TABLE IF NOT EXISTS user_jobs (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             telegram_id INTEGER NOT NULL,
                             chat_id INTEGER NOT NULL DEFAULT 0,
-                            job_title TEXT NOT NULL DEFAULT '',
-                            salary INTEGER NOT NULL DEFAULT 0,
-                            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                            job_id INTEGER NOT NULL REFERENCES job_roles(id),
                             UNIQUE(telegram_id, chat_id)
                         )
                     """)
+                await conn.commit()
+            except Exception:
+                pass
+            # Drop old user_salary table if exists
+            try:
+                await conn.execute("DROP TABLE IF EXISTS user_salary")
                 await conn.commit()
             except Exception:
                 pass
@@ -1066,54 +1091,134 @@ async def get_chat_stats(chat_id: int) -> dict:
         await conn.close()
 
 
-# ── Salary ────────────────────────────────────────────────
+# ── Jobs ──────────────────────────────────────────────────
 
-async def set_user_salary(telegram_id: int, chat_id: int, job_title: str, salary: int) -> None:
+DEFAULT_JOBS = [
+    ("Полицейский", 1500),
+    ("Врач", 1800),
+    ("Механик", 1200),
+    ("Продавец", 1000),
+    ("Строитель", 1300),
+    ("Фермер", 900),
+    ("Таксист", 1100),
+    ("Банкир", 2000),
+    ("Адвокат", 2200),
+    ("Риелтор", 1400),
+    ("Грузчик", 800),
+    ("Курьер", 700),
+]
+
+
+async def seed_jobs(chat_id: int) -> None:
     conn = await get_conn()
     try:
-        if _is_pg:
-            await conn.execute(
-                "INSERT INTO user_salary (telegram_id, chat_id, job_title, salary) "
-                "VALUES ($1, $2, $3, $4) "
-                "ON CONFLICT (telegram_id, chat_id) DO UPDATE SET job_title = $3, salary = $4, updated_at = NOW()",
-                telegram_id, chat_id, job_title, salary,
-            )
-        else:
-            await conn.execute(
-                "INSERT INTO user_salary (telegram_id, chat_id, job_title, salary) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(telegram_id, chat_id) DO UPDATE SET job_title = excluded.job_title, salary = excluded.salary, updated_at = datetime('now')",
-                (telegram_id, chat_id, job_title, salary),
-            )
+        for name, salary in DEFAULT_JOBS:
+            if _is_pg:
+                await conn.execute(
+                    "INSERT INTO job_roles (chat_id, name, salary) VALUES ($1, $2, $3) ON CONFLICT (chat_id, name) DO NOTHING",
+                    chat_id, name, salary,
+                )
+            else:
+                await conn.execute(
+                    "INSERT OR IGNORE INTO job_roles (chat_id, name, salary) VALUES (?, ?, ?)",
+                    (chat_id, name, salary),
+                )
+        if not _is_pg:
             await conn.commit()
     finally:
         await conn.close()
 
 
-async def get_user_salary(telegram_id: int, chat_id: int) -> dict | None:
+async def get_all_jobs(chat_id: int) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            row = await conn.fetchrow("SELECT * FROM user_salary WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
+            rows = await conn.fetch("SELECT * FROM job_roles WHERE chat_id = $1 ORDER BY salary DESC", chat_id)
         else:
-            cursor = await conn.execute("SELECT * FROM user_salary WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
+            cursor = await conn.execute("SELECT * FROM job_roles WHERE chat_id = ? ORDER BY salary DESC", (chat_id,))
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_job_by_name(chat_id: int, name: str) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM job_roles WHERE chat_id = $1 AND LOWER(name) = LOWER($2)", chat_id, name)
+        else:
+            cursor = await conn.execute("SELECT * FROM job_roles WHERE chat_id = ? AND LOWER(name) = LOWER(?)", (chat_id, name))
             row = await cursor.fetchone()
         return dict(row) if row else None
     finally:
         await conn.close()
 
 
-async def get_all_salaries(chat_id: int) -> list:
+async def set_job_salary(chat_id: int, name: str, new_salary: int) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT s.*, COALESCE(u.first_name, '') as first_name, COALESCE(u.username, '') as username FROM user_salary s LEFT JOIN users u ON u.telegram_id = s.telegram_id AND u.chat_id = $1 WHERE s.chat_id = $1 ORDER BY s.salary DESC", chat_id)
+            result = await conn.execute(
+                "UPDATE job_roles SET salary = $1 WHERE chat_id = $2 AND LOWER(name) = LOWER($3)",
+                new_salary, chat_id, name,
+            )
+            return "UPDATE 1" in (result or "")
+        else:
+            cursor = await conn.execute("UPDATE job_roles SET salary = ? WHERE chat_id = ? AND LOWER(name) = LOWER(?)", (new_salary, chat_id, name))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def set_user_job(telegram_id: int, chat_id: int, job_id: int) -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute(
+                "INSERT INTO user_jobs (telegram_id, chat_id, job_id) VALUES ($1, $2, $3) "
+                "ON CONFLICT (telegram_id, chat_id) DO UPDATE SET job_id = $3",
+                telegram_id, chat_id, job_id,
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO user_jobs (telegram_id, chat_id, job_id) VALUES (?, ?, ?) "
+                "ON CONFLICT(telegram_id, chat_id) DO UPDATE SET job_id = excluded.job_id",
+                (telegram_id, chat_id, job_id),
+            )
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def get_user_job_info(telegram_id: int, chat_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT j.* FROM user_jobs uj JOIN job_roles j ON j.id = uj.job_id WHERE uj.telegram_id = $1 AND uj.chat_id = $2",
+                telegram_id, chat_id,
+            )
         else:
             cursor = await conn.execute(
-                "SELECT s.*, COALESCE(u.first_name, '') as first_name, COALESCE(u.username, '') as username FROM user_salary s LEFT JOIN users u ON u.telegram_id = s.telegram_id AND u.chat_id = ? WHERE s.chat_id = ? ORDER BY s.salary DESC",
-                (chat_id, chat_id),
+                "SELECT j.* FROM user_jobs uj JOIN job_roles j ON j.id = uj.job_id WHERE uj.telegram_id = ? AND uj.chat_id = ?",
+                (telegram_id, chat_id),
             )
-            rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def remove_user_job(telegram_id: int, chat_id: int) -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute("DELETE FROM user_jobs WHERE telegram_id = $1 AND chat_id = $2", telegram_id, chat_id)
+        else:
+            await conn.execute("DELETE FROM user_jobs WHERE telegram_id = ? AND chat_id = ?", (telegram_id, chat_id))
+            await conn.commit()
     finally:
         await conn.close()
 
