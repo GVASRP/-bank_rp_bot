@@ -191,22 +191,143 @@ GREENVILLE_CARS_LEGENDARY = [
 ]
 
 LICENSED_CARS = [
-    ("Audi", "A3"), ("Audi", "A4"), ("Audi", "A6"), ("Audi", "Q5"), ("Audi", "Q7"), ("Audi", "e-tron GT"),
-    ("Renault", "5"),
-    ("Jaguar", "F-Type"), ("Jaguar", "F-Pace"), ("Jaguar", "XF"), ("Jaguar", "XJ"), ("Jaguar", "E-Pace"),
-    ("Land Rover", "Range Rover"), ("Land Rover", "Discovery"), ("Land Rover", "Defender 110"),
-    ("Land Rover", "Range Rover Sport"), ("Land Rover", "Evoque"),
-    ("Lotus", "Emira"), ("Lotus", "Evija"), ("Lotus", "Elise"),
+    ("Audi", "A3"), ("Audi", "A4"), ("Audi", "A5"), ("Audi", "A6"), ("Audi", "A8"), ("Audi", "Q5"),
+    ("Jaguar", "F-Type"), ("Jaguar", "F-Pace"), ("Jaguar", "XE"), ("Jaguar", "XF"), ("Jaguar", "I-Pace"),
+    ("Land Rover", "Range Rover"), ("Land Rover", "Discovery"), ("Land Rover", "Defender"),
+    ("Land Rover", "Range Rover Sport"), ("Land Rover", "Range Rover Evoque"),
+    ("Lotus", "Emira"), ("Lotus", "Evija"), ("Lotus", "Exige"),
     ("Pagani", "Huayra"), ("Pagani", "Utopia"), ("Pagani", "Zonda"),
-    ("Fiat", "500"), ("Fiat", "500X"),
-    ("Abarth", "595"), ("Abarth", "695"),
+    ("Fiat", "500"), ("Fiat", "Panda"),
+    ("Abarth", "500"), ("Abarth", "124 Spider"),
     ("Alfa Romeo", "Giulia"), ("Alfa Romeo", "Stelvio"), ("Alfa Romeo", "Tonale"),
-    ("Alfa Romeo", "4C"), ("Alfa Romeo", "8C"), ("Alfa Romeo", "Spider"),
-    ("Lancia", "Stratos"), ("Lancia", "Delta HF"),
+    ("Alfa Romeo", "4C"), ("Alfa Romeo", "Giulietta"), ("Alfa Romeo", "MiTo"),
+    ("Lancia", "Stratos"), ("Lancia", "Delta"),
     ("Saleen", "S1"), ("Saleen", "S7"),
+    ("Renault", "5"), ("Renault", "Clio"), ("Renault", "Megane"),
+    ("Renault", "Talisman"), ("Renault", "Captur"), ("Renault", "Kadjar"), ("Renault", "Espace"),
 ]
 
 LICENSED_BRANDS = {"Audi", "Renault", "Jaguar", "Land Rover", "Lotus", "Pagani", "Fiat", "Abarth", "Alfa Romeo", "Lancia", "Saleen"}
+
+# Wiki-verified purchasable vehicles (make → [models])
+PURCHASABLE_VEHICLES = {
+    "Arrow": ["Executive", "Phoenix", "Boomerang"],
+    "Auburn": ["Bullet", "Greenwich", "New Yorker", "Statesman", "Envoy"],
+    "Bellco": ["SixtySix"],
+    "Bovine": ["Challenger", "Hornet", "Dakota", "Durango", "Viper"],
+    "Brawnson": ["Enclave", "Acadia"],
+    "Celestial": ["Type-1", "Type-4", "Type-5", "Type-6", "Type-7", "Type-FS", "Type-FT", "FCT", "Type-4 Overland", "Celestruck"],
+    "Cobalt": ["P1", "P7", "E3"],
+    "Cratus": ["Pacifica"],
+    "DejaVu": ["Karma", "Ocean", "Pearl"],
+    "Durant": ["Amigo", "Camion", "Camion EXT", "Camion HD", "Camion PPV", "L/M 1500", "L/M 2500", "Manta", "Venice", "Voyager"],
+    "Eezee": ["EZ1", "EZ2", "Tera"],
+    "Elektrisk": ["Pluto"],
+    "Explorer": ["Harvester"],
+    "Falcon": ["Stallion", "Pony", "Scavenger", "Advance", "Traveller", "Aquarius", "Distinct",
+               "Distinct Sedan", "Distinct Hatchback", "Wanderer", "Breeze", "Departure",
+               "Advance Pro", "Heritage", "Fowarder", "Fowarder Limo", "Angle", "Fission",
+               "Impact", "Prime", "Cowboy", "eStallion", "Traveller Max", "Global Ambulance",
+               "Scavenger Pro-Trip", "Scavenger Metro", "Scavenger Sheriff", "Scavenger WSP",
+               "Scavenger Fire Rescue", "Aquarius Interceptor Sedan Metro",
+               "Aquarius Interceptor Sedan Sheriff", "Aquarius Interceptor Sedan WSP",
+               "Aquarius Security", "Advance DOT", "Advance Fire Rescue",
+               "Advance Pro Ambulance", "Advance Pro Fire Rescue", "Advance Pro SWAT",
+               "Advance SSV Security", "Advance SSV Sheriff", "Advance SSV WSP",
+               "Prime Fire Rescue", "Prime Police Interceptor Metro",
+               "Prime Police Interceptor Security", "Prime Police Interceptor Sheriff",
+               "Prime Police Interceptor WSP", "Fission Interceptor Sheriff",
+               "Fission Interceptor WSP", "Fission Interceptor Security",
+               "Fission Interceptor Fire Police", "Departure Security"],
+    "Globe": ["Metro"],
+    "DOGG": ["Poison TT", "Venom", "Venom GT", "Exorcist"],
+    "Lawn-King": ["Classic"],
+    "Leland": ["Melody", "Cypress", "Celeste", "Harmony", "Encore", "Aria", "Sonata"],
+    "Maverick": ["Marauder", "Montego", "Sable", "Milan", "Cyclone"],
+    "Newcar": ["Ivy"],
+    "Normouth": ["R1", "R1S", "R1T"],
+    "NVNA": ["Acesera", "Sprint", "Rally", "Touring", "Sport"],
+    "Saleen": ["S1", "S7"],
+    "Sentinel": ["Continental", "Town Car", "Navigator", "Aviator", "MKZ", "MKS", "MKT", "Zephyr", "LS", "Mark LT", "Blackwood"],
+    "Simple": ["Air"],
+    "Sunray": ["Sunlight"],
+    "Wynne": ["DeLorean"],
+    "Acadia": ["Syzygy", "TSR", "Yari"],
+    "Aikawa": ["Elf"],
+    "Caseus": ["R1", "R2", "R3", "R4"],
+    "Century": ["ES", "IS", "LS", "RX", "NX", "GX"],
+    "Colt": ["Riolu", "Vulpes", "Okami"],
+    "Mazuku": ["Laguna", "Sankakkei", "Yushu Performance", "Hofu", "Kazoku", "Hiro",
+               "Yushu Sedan", "Sendai", "Sendai PHEV"],
+    "Mizushima": ["Outlander", "Eclipse Cross", "Lancer", "Evolution", "Pajero", "Montero", "i-MiEV"],
+    "Rokuta": ["Amethyst"],
+    "Shizuoka": ["Alliance", "Chief", "Compound", "Finis", "Hobby", "Slick", "Slick Coupe",
+                 "Slick Hatchback", "Slick Sedan", "Slick Spec-X", "Vision"],
+    "Sumo": ["Boxas", "Woodlands", "Woodlands SPT", "Ota Sedan", "Ota Wagon", "Rockies",
+             "Climax", "Trailstar", "Ota", "Asight"],
+    "Takeo": ["Experience", "MDX", "TLX", "Integra"],
+    "Vision": ["Dominator", "Pioneer", "Prairie", "Prairie 2500HD", "Prima", "Prima V8",
+               "Puremia", "Rainier", "Riptide", "Riptide Freedom", "Robust", "Yosemite"],
+    "Audi": ["A3", "A4", "A5", "A6", "A8", "Q5"],
+    "Bayro": ["Series10", "Series20", "Series30", "Series70", "Regen", "Regen Coupe", "Regen M",
+              "Regen M CSL", "Regen Touring", "Hofmeister", "Hofmeister M",
+              "eProton", "Olympia", "Olympia M", "Olympia Coupé", "Olympia Convertible",
+              "Donner Coupé", "Donner M Coupé", "Donner Convertible", "Donner M Convertible",
+              "Gottfrieding", "Dingolfing IC", "Dingolfing M", "Dingolfing Coupé",
+              "Munich", "Munich M", "e10", "W10", "W20", "W30", "W40", "e40", "e70", "W70",
+              "eMX", "eRosenheim", "Rosenheim", "Risen", "Risen Coupé", "Risen Roadster",
+              "Leipzig", "Rheine", "Köln"],
+    "Idea": ["Twofer"],
+    "Stuttgart": ["Munster", "Uhlenhaut", "GT Surrey", "E-Saloon", "E-Saloon 063",
+                  "Kasten", "Sport Falke", "Vance", "Vance 63", "Kecskemét", "Kecskemét 45",
+                  "Executive", "Koblenz", "Koblenz 63", "Essen", "Essen Coupe", "Essen 63",
+                  "Essen 63 Coupe", "Jogger Limo", "Jogger 2500", "Allgau", "Vierturig",
+                  "Vaihingen", "Vaihingen Coupe", "Vaihingen 63", "Vaihingen 63 Coupe",
+                  "Bruecke", "Sondergeland", "Sondergeland 63", "Wilhelm Sondergeland",
+                  "Landschaft", "ES", "ES 53", "Sindelfingen"],
+    "Wolfsburg": ["Bunny", "Charge", "Classic", "Crouton", "Discovery", "Glide", "Handel",
+                  "Karen", "New Classic", "Pioneer", "Pitch", "Pitch W12", "Poseidon",
+                  "Poseidon Sportback", "Raven", "Sprint", "Symphony", "Tesuque", "Tijuana",
+                  "Tornado", "Van"],
+    "Abarth": ["500", "124 Spider"],
+    "Alfa Romeo": ["Giulia", "Stelvio", "Tonale", "4C", "Giulietta", "MiTo"],
+    "Chiara": ["Berlinetta GT", "F40", "S.F90"],
+    "Fiat": ["500", "Panda"],
+    "Lancia": ["Delta", "Stratos"],
+    "Pagani": ["Huayra", "Zonda", "Utopia"],
+    "Silhouette": ["Aventador", "Huracán", "Urus", "Murciélago", "Countach", "Miura", "Diablo", "Gallardo"],
+    "BITSY": ["Convertible"],
+    "Jaguar": ["F-Type", "F-Pace", "XE", "XF", "I-Pace"],
+    "Land Rover": ["Range Rover", "Range Rover Sport", "Range Rover Evoque", "Discovery", "Defender"],
+    "Lotus": ["Emira", "Evija", "Exige"],
+    "Marlin": ["DB11", "DBS", "Vantage", "DBX", "Valhalla", "Valkyrie", "Vanquish",
+               "Rapide", "DB9", "One-77", "V12 Vantage", "DBS Superleggera", "DB12"],
+    "Mauntley": ["Flying Spur", "Continental"],
+    "Ramsey": ["P50"],
+    "Sir Rodgers": ["Phantom", "Ghost", "Cullinan"],
+    "Surrey": ["720S", "765LT", "Artura", "Senna", "P1", "600LT", "570S"],
+    "DIRECT": ["1", "2", "3"],
+    "Skane": ["Regera"],
+    "Viking": ["S60", "V60", "XC60", "S90", "V90", "XC90", "C40", "EX30",
+               "EX90", "V40", "S40", "850", "240", "Amazon"],
+    "Western": ["Mamba", "Mamba Plus", "Python", "Cervid", "Wendigo", "Leviathan", "Protogen",
+                "Protogen-X", "Stallion", "Ute", "Falcon", "Commodore", "Statesman",
+                "Caprice", "Monaro", "Torana", "Sandman", "Kingswood"],
+    "Renault": ["5", "Clio", "Megane", "Talisman", "Captur", "Kadjar", "Espace"],
+    "Beam": ["ET7"],
+    "GIGA": ["01"],
+    "Combi": ["Satisfaction", "Spirit", "Rio", "Soul", "Optima"],
+    "Tuscani": ["Elantra", "Sonata", "Santa Fe", "Tucson", "Kona", "Veloster"],
+    "Avanta": ["E1", "E2", "E3"],
+    "Volzhsky": ["Niva"],
+    "WeGo": ["GV"],
+}
+
+PURCHASABLE_SET = {(make.lower(), model.lower()) for make, models in PURCHASABLE_VEHICLES.items() for model in models}
+
+
+def is_purchasable(make: str, model: str) -> bool:
+    return (make.lower(), model.lower()) in PURCHASABLE_SET
 
 COMMON_CARS = GREENVILLE_CARS_BUDGET
 RARE_CARS = GREENVILLE_CARS_MID + GREENVILLE_CARS_PREMIUM
@@ -264,58 +385,64 @@ def pick_rarity() -> str:
 
 
 def generate_car() -> dict:
-    rarity = pick_rarity()
-    if rarity == "legendary":
-        pool = LEGENDARY_CARS
-    elif rarity == "rare":
-        pool = RARE_CARS
-    elif rarity == "damaged":
-        pool = COMMON_CARS[:15]
-    else:
-        pool = COMMON_CARS
+    for _ in range(200):
+        rarity = pick_rarity()
+        if rarity == "legendary":
+            pool = LEGENDARY_CARS
+        elif rarity == "rare":
+            pool = RARE_CARS
+        elif rarity == "damaged":
+            pool = COMMON_CARS[:15]
+        else:
+            pool = COMMON_CARS
 
-    if rarity != "damaged" and random.random() < 0.30:
-        make, model = random.choice(LICENSED_CARS)
-    else:
-        make, model = random.choice(pool)
-    yr_lo, yr_hi = RARITY_YEARS[rarity]
-    year = random.randint(yr_lo, yr_hi)
-    miles = random.randint(5000, 180000)
-    base_prices = {2008: 2000, 2009: 2500, 2010: 3000, 2011: 3500, 2012: 4000, 2013: 5000,
-                   2014: 6000, 2015: 8000, 2016: 10000, 2017: 13000, 2018: 16000,
-                   2019: 19000, 2020: 22000, 2021: 26000, 2022: 30000, 2023: 35000,
-                   2024: 40000, 2025: 46000}
-    price = int((base_prices.get(year, 15000) + random.randint(-3000, 6000)) * RARITY_MULTIPLIERS[rarity])
-    price = max(100, price)
-    city = random.choice(WI_CITIES_RU)
-    color = random.choice(COLORS)
+        if rarity != "damaged" and random.random() < 0.30:
+            make, model = random.choice(LICENSED_CARS)
+        else:
+            make, model = random.choice(pool)
 
-    if rarity == "damaged":
-        condition = random.choice(DAMAGED_CONDITIONS)
-        features = random.sample(FEATURES, k=random.randint(0, 2))
-        title = random.choice(DAMAGED_TITLES)
-        desc = (
-            f"{color.lower()} {make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
-            f"{' • '.join(features) + ' • ' if features else ''}{title.capitalize()}."
-        )
-    else:
-        condition = random.choice(CONDITIONS)
-        features = random.sample(FEATURES, k=random.randint(3, 6))
-        title = random.choice(TITLES)
-        color_prefix = f"{color.lower()} " if rarity == "common" else ""
-        desc = (
-            f"{color_prefix}{make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
-            f"{' • '.join(features)}. {title.capitalize()}."
-        )
+        if not is_purchasable(make, model):
+            continue
 
-    vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
-    license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9994)}"
-    return {
-        "make": make, "model": model, "year": year, "miles": miles,
-        "price": price, "city": city, "description": desc, "vin": vin,
-        "license_plate": license_plate, "color": color, "rarity": rarity,
-        "guid": f"gen_{rarity}_{vin}",
-    }
+        yr_lo, yr_hi = RARITY_YEARS[rarity]
+        year = random.randint(yr_lo, yr_hi)
+        miles = random.randint(5000, 180000)
+        base_prices = {2008: 2000, 2009: 2500, 2010: 3000, 2011: 3500, 2012: 4000, 2013: 5000,
+                       2014: 6000, 2015: 8000, 2016: 10000, 2017: 13000, 2018: 16000,
+                       2019: 19000, 2020: 22000, 2021: 26000, 2022: 30000, 2023: 35000,
+                       2024: 40000, 2025: 46000}
+        price = int((base_prices.get(year, 15000) + random.randint(-3000, 6000)) * RARITY_MULTIPLIERS[rarity])
+        price = max(100, price)
+        city = random.choice(WI_CITIES_RU)
+        color = random.choice(COLORS)
+
+        if rarity == "damaged":
+            condition = random.choice(DAMAGED_CONDITIONS)
+            features = random.sample(FEATURES, k=random.randint(0, 2))
+            title = random.choice(DAMAGED_TITLES)
+            desc = (
+                f"{color.lower()} {make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
+                f"{' • '.join(features) + ' • ' if features else ''}{title.capitalize()}."
+            )
+        else:
+            condition = random.choice(CONDITIONS)
+            features = random.sample(FEATURES, k=random.randint(3, 6))
+            title = random.choice(TITLES)
+            color_prefix = f"{color.lower()} " if rarity == "common" else ""
+            desc = (
+                f"{color_prefix}{make} {model} {year}, {miles:,} миль. {condition.capitalize()}, "
+                f"{' • '.join(features)}. {title.capitalize()}."
+            )
+
+        vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
+        license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9994)}"
+        return {
+            "make": make, "model": model, "year": year, "miles": miles,
+            "price": price, "city": city, "description": desc, "vin": vin,
+            "license_plate": license_plate, "color": color, "rarity": rarity,
+            "guid": f"gen_{rarity}_{vin}",
+        }
+    return generate_car()
 
 
 async def _search_wiki_image(search_term: str) -> bytes | None:
