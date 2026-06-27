@@ -1467,6 +1467,33 @@ async def get_job_holder_info(chat_id: int, job_name: str) -> dict | None:
         await conn.close()
 
 
+async def get_all_users_with_jobs(chat_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT u.telegram_id, u.username, u.first_name, "
+                "j.name as job_name, j.salary "
+                "FROM user_jobs uj "
+                "JOIN job_roles j ON j.id = uj.job_id "
+                "JOIN users u ON u.telegram_id = uj.telegram_id "
+                "WHERE uj.chat_id = $1 ORDER BY j.name", chat_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT u.telegram_id, u.username, u.first_name, "
+                "j.name as job_name, j.salary "
+                "FROM user_jobs uj "
+                "JOIN job_roles j ON j.id = uj.job_id "
+                "JOIN users u ON u.telegram_id = uj.telegram_id "
+                "WHERE uj.chat_id = ? ORDER BY j.name", (chat_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 # ── Vehicle ───────────────────────────────────────────────
 
 async def get_vehicle_by_position(chat_id: int, position: int) -> dict | None:

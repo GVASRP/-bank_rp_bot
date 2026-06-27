@@ -18,6 +18,7 @@ from database import (
     approve_job_request,
     reject_job_request,
     is_job_taken,
+    get_all_users_with_jobs,
     update_balance,
     add_transaction,
 )
@@ -126,8 +127,11 @@ async def cmd_take_job(message: Message):
         return
     job_name = args[1].strip().capitalize()
     current = await get_user_job_info(message.from_user.id, message.chat.id)
-    if current and current["name"].lower() == job_name.lower():
-        await message.reply(f"❌ Вы уже работаете \"{current['name']}\"")
+    if current:
+        if current["name"].lower() == job_name.lower():
+            await message.reply(f"❌ Вы уже работаете \"{current['name']}\"")
+            return
+        await message.reply(f"❌ Вы уже работаете \"{current['name']}\". Сначала увольтесь: <code>!уволиться</code>", parse_mode="HTML")
         return
     job = await get_job_by_name(message.chat.id, job_name)
     if not job:
@@ -168,6 +172,28 @@ async def cmd_my_job(message: Message):
         f"👑 Зарплату выплачивает админ после сессии: <code>!зп @users</code>{extra}",
         parse_mode="HTML",
     )
+
+
+@router.message(Command("работы", prefix="!/"))
+async def cmd_all_jobs(message: Message):
+    if message.chat.type in ("group", "supergroup") and not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    rows = await get_all_users_with_jobs(message.chat.id)
+    if not rows:
+        await message.reply("📭 Никто не работает")
+        return
+    by_job = {}
+    for r in rows:
+        by_job.setdefault(r["job_name"], []).append(r)
+    lines = ["📋 <b>Все сотрудники:</b>\n"]
+    for job_name, users in sorted(by_job.items()):
+        lines.append(f"  • <b>{job_name}</b> ({users[0]['salary']} $):")
+        for u in users:
+            name = u["first_name"] or u["username"] or str(u["telegram_id"])
+            lines.append(f"    — {name}")
+        lines.append("")
+    await message.reply("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("уволиться", prefix="!/"))

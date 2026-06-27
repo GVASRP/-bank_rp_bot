@@ -386,7 +386,7 @@ def generate_placeholder_image(car: dict) -> bytes:
     return buf.getvalue()
 
 
-async def fetch_car_image(make: str, model: str, car: dict | None = None) -> bytes | None:
+async def fetch_car_image(make: str, model: str) -> bytes | None:
     real_brand = get_real_brand(make)
     if real_brand:
         img = await _search_wiki_image(f"{real_brand} {model}")
@@ -395,8 +395,6 @@ async def fetch_car_image(make: str, model: str, car: dict | None = None) -> byt
     img = await _search_wiki_image(f"{make} {model}")
     if img:
         return img
-    if car:
-        return generate_placeholder_image(car)
     return None
 
 
@@ -430,15 +428,20 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
         car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
-    image = await fetch_car_image(car["make"], car["model"], car)
+    image = await fetch_car_image(car["make"], car["model"])
 
     try:
+        from aiogram.types import BufferedInputFile
         send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-        from aiogram.types import BufferedInputFile
-        send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
-        await bot.send_photo(**send_args, caption=caption)
+
+        if image:
+            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+            await bot.send_photo(**send_args, caption=caption)
+        else:
+            send_args["text"] = caption
+            await bot.send_message(**send_args)
 
         await mark_listing_posted(car["guid"])
         return True
@@ -469,14 +472,20 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
         car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
-    image = await fetch_car_image(car["make"], car["model"], car)
+    image = await fetch_car_image(car["make"], car["model"])
     try:
+        from aiogram.types import BufferedInputFile
         send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-        from aiogram.types import BufferedInputFile
-        send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
-        await bot.send_photo(**send_args, caption=caption)
+
+        if image:
+            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+            await bot.send_photo(**send_args, caption=caption)
+        else:
+            send_args["text"] = caption
+            await bot.send_message(**send_args)
+
         await mark_listing_posted(car["guid"])
         badge = RARITY_NAMES[car["rarity"]]
         title = get_car_title(car["make"], car["model"])
