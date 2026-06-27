@@ -454,7 +454,7 @@ def generate_car() -> dict:
             )
 
         vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
-        license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9994)}"
+        license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(100,999)}"
         return {
             "make": make, "model": model, "year": year, "miles": miles,
             "price": price, "city": city, "description": desc, "vin": vin,

@@ -1046,9 +1046,9 @@ async def get_user_vehicles(telegram_id: int) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 ORDER BY created_at DESC", telegram_id)
+            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 ORDER BY id ASC", telegram_id)
         else:
-            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? ORDER BY created_at DESC", (telegram_id,))
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? ORDER BY id ASC", (telegram_id,))
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:

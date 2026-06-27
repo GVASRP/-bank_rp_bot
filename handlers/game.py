@@ -182,15 +182,15 @@ async def cmd_my_cars(message: Message):
         await message.reply("📭 У вас нет автомобилей")
         return
     lines = ["🚗 <b>Ваши автомобили:</b>\n"]
-    for v in vehicles:
+    for idx, v in enumerate(vehicles, 1):
         status_emoji = "✅" if v["status"] == "sold" else "🔄"
         price_info = f" | Цена: ${v['price']:,}" if v["status"] == "player_listed" else ""
         lines.append(
-            f"#{v['id']} {status_emoji} {v['year']} {v['make']} {v['model']}\n"
+            f"#{idx} {status_emoji} {v['year']} {v['make']} {v['model']}\n"
             f"   🔑 {v['license_plate']} | 📍 {v['city']}{price_info}"
         )
-    lines.append("\n💡 <code>!продать ID цена</code> — выставить на продажу игрокам")
-    lines.append("💡 <code>!снять_продажу ID</code> — убрать из продажи")
+    lines.append("\n💡 <code>!продать НОМЕР цена</code> — выставить на продажу игрокам")
+    lines.append("💡 <code>!снять_продажу НОМЕР</code> — убрать из продажи")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
@@ -236,22 +236,24 @@ async def cmd_sell_car(message: Message):
 async def cmd_list_car(message: Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
-        await message.reply("❌ Использование: <code>!продать ID_авто цена</code>\nПример: <code>!продать 5 25000</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!продать НОМЕР цена</code>\nПример: <code>!продать 5 25000</code>", parse_mode="HTML")
         return
     try:
-        vid = int(args[1])
+        pos = int(args[1])
         price = int(args[2])
     except ValueError:
-        await message.reply("❌ ID и цена должны быть числами")
+        await message.reply("❌ Номер и цена должны быть числами")
         return
     if price <= 0:
         await message.reply("❌ Цена должна быть больше 0")
         return
 
-    v = await get_vehicle(vid)
-    if not v:
-        await message.reply(f"❌ Авто #{vid} не найдено")
+    user_vehicles = await get_user_vehicles(message.from_user.id)
+    if pos < 1 or pos > len(user_vehicles):
+        await message.reply(f"❌ Авто #{pos} не найдено")
         return
+    v = user_vehicles[pos - 1]
+    vid = v["id"]
     if v["owner_telegram_id"] != message.from_user.id:
         await message.reply("❌ Это не ваш автомобиль")
         return
@@ -280,21 +282,20 @@ async def cmd_list_car(message: Message):
 async def cmd_unlist_car(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!снять_продажу ID_авто</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!снять_продажу НОМЕР</code>", parse_mode="HTML")
         return
     try:
-        vid = int(args[1])
+        pos = int(args[1])
     except ValueError:
-        await message.reply("❌ ID должен быть числом")
+        await message.reply("❌ Номер должен быть числом")
         return
 
-    v = await get_vehicle(vid)
-    if not v:
-        await message.reply(f"❌ Авто #{vid} не найдено")
+    user_vehicles = await get_user_vehicles(message.from_user.id)
+    if pos < 1 or pos > len(user_vehicles):
+        await message.reply(f"❌ Авто #{pos} не найдено")
         return
-    if v["owner_telegram_id"] != message.from_user.id:
-        await message.reply("❌ Это не ваш автомобиль")
-        return
+    v = user_vehicles[pos - 1]
+    vid = v["id"]
     if v["status"] != "player_listed":
         await message.reply("❌ Это авто не выставлено на продажу")
         return
