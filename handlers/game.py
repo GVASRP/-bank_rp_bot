@@ -260,9 +260,15 @@ async def cmd_list_car(message: Message):
         await message.reply("❌ Ошибка выставления на продажу")
         return
 
+    # Calculate position in combined listing for buyer reference
+    market = await get_available_vehicles(chat_id=message.chat.id)
+    player = await get_player_listed_vehicles()
+    all_v = (market or []) + (player or [])
+    buy_pos = next((i for i, av in enumerate(all_v, 1) if av["id"] == vid), vid)
+
     await message.reply(
         f"✅ {v['year']} {v['make']} {v['model']} выставлен на продажу за ${price:,}!\n"
-        f"💡 Другие игроки могут купить его через <code>!купить НОМЕР</code>",
+        f"💡 Другие игроки могут купить его через <code>!купить {buy_pos}</code>",
         parse_mode="HTML",
     )
 
