@@ -185,10 +185,15 @@ async def init_db():
                 telegram_id BIGINT NOT NULL,
                 chat_id BIGINT NOT NULL DEFAULT 0,
                 job_id INTEGER NOT NULL REFERENCES job_roles(id),
+                last_payout TIMESTAMP,
                 UNIQUE(telegram_id, chat_id)
             )
         """)
         await conn.execute("DROP TABLE IF EXISTS user_salary")
+        try:
+            await conn.execute("ALTER TABLE user_jobs ADD COLUMN IF NOT EXISTS last_payout TIMESTAMP")
+        except Exception:
+            pass
     else:
         conn = await get_conn()
         try:
@@ -293,10 +298,15 @@ async def init_db():
                     telegram_id INTEGER NOT NULL,
                     chat_id INTEGER NOT NULL DEFAULT 0,
                     job_id INTEGER NOT NULL REFERENCES job_roles(id),
+                    last_payout TEXT,
                     UNIQUE(telegram_id, chat_id)
                 );
                 DROP TABLE IF EXISTS user_salary;
             """)
+            try:
+                await conn.execute("ALTER TABLE user_jobs ADD COLUMN last_payout TEXT")
+            except Exception:
+                pass
             await conn.commit()
             # Migration: add chat_id column if missing
             try:
@@ -1072,34 +1082,126 @@ async def get_chat_stats(chat_id: int) -> dict:
 
 # ── Jobs ──────────────────────────────────────────────────
 
+JOB_CATEGORIES = {
+    # Law Enforcement
+    "Шериф": "law",
+    "Заместитель шерифа": "law",
+    "Полицейский": "law",
+    "Офицер дорожной полиции": "law",
+    # Legal
+    "Судья": "legal",
+    "Прокурор": "legal",
+    "Адвокат": "legal",
+    # Government
+    "Мэр": "government",
+    "Городской клерк": "government",
+    # Emergency
+    "Пожарный": "emergency",
+    "Фельдшер": "emergency",
+    # Medical
+    "Врач": "medical",
+    "Медсестра": "medical",
+    # Service / Civilian
+    "Кассир": "civilian",
+    "Официант": "civilian",
+    "Бармен": "civilian",
+    "Работник заправки": "civilian",
+    "Механик": "civilian",
+    "Автодилер": "civilian",
+    "Таксист": "civilian",
+    "Водитель автобуса": "civilian",
+    "Дальнобойщик": "civilian",
+    "Фермер": "civilian",
+    "Строитель": "civilian",
+    "Рабочий завода": "civilian",
+    "Банкир": "civilian",
+    "Риелтор": "civilian",
+    "Предприниматель": "civilian",
+    # Criminal
+    "Вор": "criminal",
+    "Угонщик": "criminal",
+    "Наркоторговец": "criminal",
+    "Хакер": "criminal",
+    "Контрабандист": "criminal",
+    "Бандит": "criminal",
+}
+
 DEFAULT_JOBS = [
-    ("Полицейский", 1500),
-    ("Врач", 1800),
-    ("Механик", 1200),
-    ("Продавец", 1000),
-    ("Строитель", 1300),
-    ("Фермер", 900),
-    ("Таксист", 1100),
-    ("Банкир", 2000),
-    ("Адвокат", 2200),
-    ("Риелтор", 1400),
-    ("Грузчик", 800),
-    ("Курьер", 700),
+    # Law Enforcement
+    ("Шериф", 3000),
+    ("Заместитель шерифа", 2400),
+    ("Полицейский", 1800),
+    ("Офицер дорожной полиции", 2000),
+    # Legal
+    ("Судья", 3500),
+    ("Прокурор", 2800),
+    ("Адвокат", 2400),
+    # Government
+    ("Мэр", 4000),
+    ("Городской клерк", 1500),
+    # Emergency Services
+    ("Пожарный", 2000),
+    ("Фельдшер", 1800),
+    # Healthcare
+    ("Врач", 2500),
+    ("Медсестра", 1600),
+    # Retail & Service
+    ("Кассир", 1000),
+    ("Официант", 800),
+    ("Бармен", 1200),
+    ("Работник заправки", 900),
+    # Auto
+    ("Механик", 1600),
+    ("Автодилер", 2000),
+    # Transportation
+    ("Таксист", 1200),
+    ("Водитель автобуса", 1400),
+    ("Дальнобойщик", 1700),
+    # Blue Collar
+    ("Фермер", 1500),
+    ("Строитель", 1500),
+    ("Рабочий завода", 1200),
+    # White Collar
+    ("Банкир", 2800),
+    ("Риелтор", 2000),
+    ("Предприниматель", 3000),
+    # Criminal
+    ("Вор", 2200),
+    ("Угонщик", 2400),
+    ("Наркоторговец", 2800),
+    ("Хакер", 3000),
+    ("Контрабандист", 2500),
+    ("Бандит", 2000),
 ]
+
+
+def get_job_category(job_name: str) -> str:
+    return JOB_CATEGORIES.get(job_name, "civilian")
 
 
 async def seed_jobs(chat_id: int) -> None:
     conn = await get_conn()
     try:
+        existing = await get_all_jobs(chat_id)
+        existing_names = {j["name"] for j in existing}
+        new_names = {j[0] for j in DEFAULT_JOBS}
+        if existing_names == new_names:
+            return
+        if _is_pg:
+            await conn.execute("DELETE FROM user_jobs WHERE chat_id = $1", chat_id)
+            await conn.execute("DELETE FROM job_roles WHERE chat_id = $1", chat_id)
+        else:
+            await conn.execute("DELETE FROM user_jobs WHERE chat_id = ?", (chat_id,))
+            await conn.execute("DELETE FROM job_roles WHERE chat_id = ?", (chat_id,))
         for name, salary in DEFAULT_JOBS:
             if _is_pg:
                 await conn.execute(
-                    "INSERT INTO job_roles (chat_id, name, salary) VALUES ($1, $2, $3) ON CONFLICT (chat_id, name) DO NOTHING",
+                    "INSERT INTO job_roles (chat_id, name, salary) VALUES ($1, $2, $3)",
                     chat_id, name, salary,
                 )
             else:
                 await conn.execute(
-                    "INSERT OR IGNORE INTO job_roles (chat_id, name, salary) VALUES (?, ?, ?)",
+                    "INSERT INTO job_roles (chat_id, name, salary) VALUES (?, ?, ?)",
                     (chat_id, name, salary),
                 )
         if not _is_pg:

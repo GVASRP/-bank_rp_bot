@@ -2,8 +2,10 @@ import asyncio
 import logging
 import random
 import time
+from io import BytesIO
 
 import aiohttp
+from PIL import Image, ImageDraw, ImageFont
 
 from database import is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle
 
@@ -11,6 +13,32 @@ logger = logging.getLogger(__name__)
 
 WIKI_SEARCH = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=3"
 WIKI_IMAGE = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles=%s&format=json&pithumbsize=600"
+
+BRAND_TO_REAL = {
+    "Arrow": "Pontiac", "Avanta": "Fictional", "Bandit": "Ford",
+    "Barchetta": "Maserati", "BKM": "BMW", "Brawnson": "GMC",
+    "BullHorn": "Dodge", "Caline": "Saleen", "Celestial": "Tesla",
+    "Chevlon": "Chevrolet", "Chryslus": "Chrysler", "Colt": "Fictional",
+    "Combi": "Kia", "DejaVu": "Fisker", "Durant": "Chevrolet",
+    "Elgrand": "Infiniti", "Falcon": "Ford", "Ferdinand": "Porsche",
+    "Globe": "Geo", "Horlock": "BlueBird", "Jupiter": "Saturn",
+    "Leland": "Cadillac", "Mauntley": "Bentley", "Mayflower": "Plymouth",
+    "Mazuku": "Mazda", "Mizushima": "Mitsubishi", "Navara": "Nissan",
+    "Newcar": "Oldsmobile", "Normouth": "Rivian", "Oakura": "Fictional",
+    "Origin": "Genesis", "Overland": "Jeep", "Revver": "Hummer",
+    "Sentinel": "Lincoln", "Shizuoka": "Honda", "Silhouette": "Lamborghini",
+    "Simple": "Lucid", "SirRodgers": "Rolls-Royce", "Sir Rodgers": "Rolls-Royce",
+    "Stuttgart": "Mercedes-Benz", "Sumo": "Subaru", "Surrey": "McLaren",
+    "Tuscani": "Hyundai", "Valley": "Holden", "Viking": "Volvo",
+    "Vision": "Toyota", "Volzhsky": "Lada", "VSV": "HSV",
+    "Western": "Fictional", "Wolfsburg": "Volkswagen",
+    "Caseus": "Fictional", "Cobalt": "Carbon Motors", "Maverick": "Mercury",
+    "Explorer": "International", "Marlin Motors": "Aston Martin", "BITSY": "MINI",
+    "Beam": "NIO", "Bellco": "Shelby", "Eezee": "EZ-GO",
+    "GIGA": "Lynk&Co", "Romalpha": "Alfa Romeo", "Acadia": "Mitsubishi",
+    "Aikawa": "Isuzu", "Idea": "Smart", "Takeo": "Acura",
+    "Century": "Lexus", "Bovine": "Dodge",
+}
 
 COLORS = [
     "Белый", "Чёрный", "Серебристый", "Серый", "Синий", "Красный",
@@ -64,19 +92,18 @@ GREENVILLE_CARS_MID = [
     ("Maverick", "Criminal"), ("BKM", "Dingolfing"), ("Leland", "DeRoute"),
     ("Maverick", "Valiant"), ("Ferdinand", "Ultima"),
     ("Explorer", "Dependable 4300"), ("Marlin Motors", "Velindre"),
-    ("Maverick", "Aristocrat"), ("Panini", "Ostro"), ("Stuttgart", "GT Surrey"),
+    ("Maverick", "Aristocrat"), ("Stuttgart", "GT Surrey"),
     ("BullHorn", "Bullet"), ("Chryslus", "Suburbia"), ("Idea", "Twofer"),
-    ("Piranha", "Moray"), ("Piranha", "Bromwich"), ("Viking", "Kompakt"),
+    ("Viking", "Kompakt"),
     ("Eezee", "GML"), ("Barchetta", "GrandTourer"),
     ("BKM", "Regen M Coupe"), ("Silhouette", "Gioiosa"), ("Cobalt", "Pursuiter"),
     ("Falcon", "Fission"), ("Surrey", "Renaissance"), ("Vision", "Prima"),
     ("Marlin Motors", "Swan"), ("Sentinel", "Adventurer"), ("Valley", "Admiral"),
     ("Avanta", "Rho"), ("BullHorn", "Vengence"),
-    ("Piranha", "Appraise"), ("TONY", "Cinco"),
     ("Bellco", "SixtySix"), ("BullHorn", "Location"),
     ("Mizushima", "Yari Evolution"), ("Stuttgart", "Kecskemét"),
     ("Stuttgart", "Vance"), ("Brawnson", "Noble Wagon"),
-    ("Piranha", "Summit"), ("Surrey", "LT-500"), ("Vision", "Puremia"),
+    ("Surrey", "LT-500"), ("Vision", "Puremia"),
     ("BullHorn", "SFP Python"), ("Falcon", "Advance Pro"),
     ("Stuttgart", "Essen"), ("Stuttgart", "Executive"),
     ("Stuttgart", "GT Surrey 722"), ("Vision", "Rainier"),
@@ -86,16 +113,16 @@ GREENVILLE_CARS_MID = [
     ("BKM", "Olympia"), ("BKM", "Risen"), ("Caseus", "E2"),
     ("Durant", "Voyager"), ("Leland", "LTS6"), ("Mizushima", "Fantasy"),
     ("Navara", "Compact"), ("Navara", "Senses"), ("Overland", "Apache"),
-    ("Surrey", "Speedlet"), ("TerrainTraveller", "Shield"), ("Vision", "Prairie"),
+    ("Surrey", "Speedlet"), ("Vision", "Prairie"),
     ("Combi", "Portofino"), ("Marlin Motors", "Bristol"),
     ("Marlin Motors", "London"), ("Mazuku", "Hiro"), ("Navara", "Boundary"),
     ("Origin", "Busan"), ("Sir Rodgers", "Specter"), ("Stuttgart", "Bruecke"),
-    ("TerrainTraveller", "Explorer"), ("BKM", "Köln"),
+    ("BKM", "Köln"),
     ("BKM", "Munich M"), ("Combi", "Pandora"),
     ("Elgrand", "Immense"), ("Falcon", "Rampage"),
     ("Mauntley", "National GT"), ("Overland", "Apache L"),
-    ("Piranha", "E-Stride"), ("Sentinel", "Raider"),
-    ("TerrainTraveller", "Preserver"), ("Beam", "SB7"),
+    ("Sentinel", "Raider"),
+    ("Beam", "SB7"),
     ("Brawnson", "Arlington XL"), ("Chevlon", "Corbeta Manta"),
     ("Falcon", "Cowboy"), ("Ferdinand", "Snapper"), ("Ferdinand", "Vivo"),
     ("Leland", "Vault"), ("Normouth", "SN-1"), ("Origin", "Ulsan"),
@@ -121,7 +148,7 @@ GREENVILLE_CARS_PREMIUM = [
     ("BKM", "Donner Coupé"), ("BKM", "Donner M Coupé"),
     ("Overland", "Combatant"), ("Stuttgart", "Landschaft"),
     ("Stuttgart", "Sondergeland"), ("Stuttgart", "Vaihingen"),
-    ("Western", "Sergal"), ("Autowerk", "Bremen VS"),
+    ("Western", "Sergal"),
     ("BKM", "eProton"), ("BKM", "Spartanburg"),
     ("Elgrand", "Percepttion"), ("Navara", "Squadron"),
     ("Revver", "EV"), ("Stuttgart", "ES"),
@@ -130,7 +157,7 @@ GREENVILLE_CARS_PREMIUM = [
     ("Leland", "LTS5 V"), ("Leland", "Vault K Edition"),
     ("Navara", "Territory"), ("Normouth", "TN-1"),
     ("Simple", "Atmos"), ("Vision", "Riptide"),
-    ("Autowerk", "Anodic GT"), ("BKM", "Series70"),
+    ("BKM", "Series70"),
     ("BKM", "W70"), ("Chevlon", "Corbeta Manta E-Ray"),
     ("Normouth", "VN-1"), ("Tuscani", "Euphoria M"),
     ("Celestial", "Type-FS"), ("Celestial", "Type-FT"),
@@ -152,7 +179,7 @@ GREENVILLE_CARS_LEGENDARY = [
     ("BKM", "Zoom"), ("BullHorn", "SuperCarrier"),
     ("Durant", "Camion HEEN"), ("Overland", "Apache SFP Heen H1000"),
     ("Sir Rodgers", "Constellation"), ("Overland", "Combatant Ghoul 6x6"),
-    ("Romalpha", "Julie Quadluck"), ("Stuttgart", "Vaihingen 63"),
+    ("Stuttgart", "Vaihingen 63"),
     ("Surrey", "Grand Tourer"), ("Wolfsburg", "Symphony"),
     ("Elgrand", "Smyrna"), ("Ferdinand", "Rapido GT3"),
     ("GIGA", "G3"), ("SirRodgers", "Constellation K-Edition"),
@@ -162,6 +189,24 @@ GREENVILLE_CARS_LEGENDARY = [
     ("Stuttgart", "Wilhelm Munster"), ("Simple", "Atmos Sapphire"),
     ("Western", "Leviathan"),
 ]
+
+LICENSED_CARS = [
+    ("Audi", "A3"), ("Audi", "A4"), ("Audi", "A6"), ("Audi", "Q5"), ("Audi", "Q7"), ("Audi", "e-tron GT"),
+    ("Renault", "5"),
+    ("Jaguar", "F-Type"), ("Jaguar", "F-Pace"), ("Jaguar", "XF"), ("Jaguar", "XJ"), ("Jaguar", "E-Pace"),
+    ("Land Rover", "Range Rover"), ("Land Rover", "Discovery"), ("Land Rover", "Defender 110"),
+    ("Land Rover", "Range Rover Sport"), ("Land Rover", "Evoque"),
+    ("Lotus", "Emira"), ("Lotus", "Evija"), ("Lotus", "Elise"),
+    ("Pagani", "Huayra"), ("Pagani", "Utopia"), ("Pagani", "Zonda"),
+    ("Fiat", "500"), ("Fiat", "500X"),
+    ("Abarth", "595"), ("Abarth", "695"),
+    ("Alfa Romeo", "Giulia"), ("Alfa Romeo", "Stelvio"), ("Alfa Romeo", "Tonale"),
+    ("Alfa Romeo", "4C"), ("Alfa Romeo", "8C"), ("Alfa Romeo", "Spider"),
+    ("Lancia", "Stratos"), ("Lancia", "Delta HF"),
+    ("Saleen", "S1"), ("Saleen", "S7"),
+]
+
+LICENSED_BRANDS = {"Audi", "Renault", "Jaguar", "Land Rover", "Lotus", "Pagani", "Fiat", "Abarth", "Alfa Romeo", "Lancia", "Saleen"}
 
 COMMON_CARS = GREENVILLE_CARS_BUDGET
 RARE_CARS = GREENVILLE_CARS_MID + GREENVILLE_CARS_PREMIUM
@@ -195,6 +240,19 @@ RARITY_NAMES = {"common": "", "damaged": "💥 Битый", "rare": "⭐ Ред�
 RARITY_YEARS = {"common": (2014, 2025), "damaged": (2008, 2018), "rare": (2018, 2025), "legendary": (2020, 2025)}
 
 
+def get_real_brand(make: str) -> str | None:
+    return BRAND_TO_REAL.get(make)
+
+
+def get_car_title(make: str, model: str) -> str:
+    if make in LICENSED_BRANDS:
+        return f"{make} {model}"
+    real = get_real_brand(make)
+    if real and real != "Fictional":
+        return f"{make} {model} ({real} {model})"
+    return f"{make} {model}"
+
+
 def pick_rarity() -> str:
     roll = random.randint(1, 100)
     cumulative = 0
@@ -216,7 +274,10 @@ def generate_car() -> dict:
     else:
         pool = COMMON_CARS
 
-    make, model = random.choice(pool)
+    if rarity != "damaged" and random.random() < 0.30:
+        make, model = random.choice(LICENSED_CARS)
+    else:
+        make, model = random.choice(pool)
     yr_lo, yr_hi = RARITY_YEARS[rarity]
     year = random.randint(yr_lo, yr_hi)
     miles = random.randint(5000, 180000)
@@ -248,7 +309,7 @@ def generate_car() -> dict:
         )
 
     vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
-    license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9999)}"
+    license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(1000,9994)}"
     return {
         "make": make, "model": model, "year": year, "miles": miles,
         "price": price, "city": city, "description": desc, "vin": vin,
@@ -257,10 +318,9 @@ def generate_car() -> dict:
     }
 
 
-async def fetch_car_image(make: str, model: str) -> bytes | None:
+async def _search_wiki_image(search_term: str) -> bytes | None:
     try:
-        full = f"{make} {model}".replace("  ", " ")
-        search_url = WIKI_SEARCH % full
+        search_url = WIKI_SEARCH % search_term
         async with aiohttp.ClientSession() as s:
             async with s.get(search_url, headers=HEADERS, timeout=8) as r:
                 if r.status != 200:
@@ -270,7 +330,7 @@ async def fetch_car_image(make: str, model: str) -> bytes | None:
         if not pages:
             return None
         title = pages[0]["title"]
-        img_url = WIKI_IMAGE % title.replace(" ", "_").replace("-", "_")
+        img_url = WIKI_IMAGE % title.replace(" ", "_")
         async with aiohttp.ClientSession() as s:
             async with s.get(img_url, headers=HEADERS, timeout=8) as r:
                 if r.status != 200:
@@ -284,16 +344,74 @@ async def fetch_car_image(make: str, model: str) -> bytes | None:
                         if r.status == 200:
                             return await r.read()
     except Exception as e:
-        logger.warning("Image fetch failed for %s %s: %s", make, model, e)
+        logger.warning("Wiki image search failed for '%s': %s", search_term, e)
+    return None
+
+
+def generate_placeholder_image(car: dict) -> bytes:
+    width, height = 800, 500
+    img = Image.new("RGB", (width, height), (20, 30, 55))
+    draw = ImageDraw.Draw(img)
+
+    try:
+        ftitle = ImageFont.truetype("C:\\Windows\\Fonts\\Arial.ttf", 44)
+        fsub = ImageFont.truetype("C:\\Windows\\Fonts\\Arial.ttf", 28)
+        finfo = ImageFont.truetype("C:\\Windows\\Fonts\\Arial.ttf", 20)
+    except Exception:
+        try:
+            ftitle = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
+            fsub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+            finfo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+        except Exception:
+            ftitle = fsub = finfo = ImageFont.load_default()
+
+    draw.rectangle([0, 0, width, 6], fill=(60, 120, 255))
+    draw.text((40, 25), "Greenville, Wisconsin", fill=(100, 140, 220), font=fsub)
+    draw.text((40, 75), f"{car['year']} {car['make']} {car['model']}", fill=(255, 255, 255), font=ftitle)
+    price_color = (80, 255, 120) if car["rarity"] != "damaged" else (255, 100, 80)
+    draw.text((40, 140), f"${car['price']:,}", fill=price_color, font=fsub)
+    y = 215
+    for label, val in [("Пробег", f"{car['miles']:,} миль"), ("Цвет", car["color"]),
+                        ("VIN", car["vin"]), ("Локация", car["city"] + ", WI")]:
+        draw.text((40, y), f"{label}: {val}", fill=(180, 190, 210), font=finfo)
+        y += 32
+    rarity_colors = {"common": (100, 200, 255), "rare": (255, 200, 80), "legendary": (255, 80, 80), "damaged": (120, 120, 120)}
+    rc = rarity_colors.get(car["rarity"], (200, 200, 200))
+    draw.rectangle([width - 180, height - 55, width - 20, height - 25], fill=rc)
+    rtxt = car["rarity"].upper()
+    tw, _ = draw.textbbox((0, 0), rtxt, font=finfo)[2:4]
+    draw.text((width - 100 - tw // 2, height - 48), rtxt, fill=(255, 255, 255), font=finfo)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return buf.getvalue()
+
+
+async def fetch_car_image(make: str, model: str, car: dict | None = None) -> bytes | None:
+    real_brand = get_real_brand(make)
+    if real_brand:
+        img = await _search_wiki_image(f"{real_brand} {model}")
+        if img:
+            return img
+    img = await _search_wiki_image(f"{make} {model}")
+    if img:
+        return img
+    if car:
+        return generate_placeholder_image(car)
     return None
 
 
 def format_caption(car: dict, vehicle_id: int) -> str:
     rarity_prefix = RARITY_NAMES[car["rarity"]]
     rarity_line = f"\n{rarity_prefix}" if rarity_prefix else ""
-    disclaimer = "\n📸 Фото для примера (Wikipedia)" if car["rarity"] != "damaged" else ""
+    title = get_car_title(car["make"], car["model"])
+    real_brand = get_real_brand(car["make"])
+    disclaimer = ""
+    if car["make"] in LICENSED_BRANDS:
+        disclaimer = "\n✅ Лицензионный дилер"
+    elif real_brand and real_brand != "Fictional":
+        disclaimer = f"\n📸 {real_brand} {car['model']} (для примера)"
     return (
-        f"🚗 <b>{car['year']} {car['make']} {car['model']}</b>\n"
+        f"🚗 <b>{car['year']} {title}</b>\n"
         f"📍 {car['city']}, WI\n"
         f"💰 ${car['price']:,} | {car['miles']:,} миль\n"
         f"🎨 {car['color']}\n"
@@ -312,18 +430,15 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
         car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
-    image = await fetch_car_image(car["make"], car["model"])
+    image = await fetch_car_image(car["make"], car["model"], car)
 
     try:
         send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-        if image:
-            from aiogram.types import BufferedInputFile
-            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
-            await bot.send_photo(**send_args, caption=caption)
-        else:
-            await bot.send_message(**send_args, text=caption)
+        from aiogram.types import BufferedInputFile
+        send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+        await bot.send_photo(**send_args, caption=caption)
 
         await mark_listing_posted(car["guid"])
         return True
@@ -354,20 +469,18 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
         car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
-    image = await fetch_car_image(car["make"], car["model"])
+    image = await fetch_car_image(car["make"], car["model"], car)
     try:
         send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-        if image:
-            from aiogram.types import BufferedInputFile
-            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
-            await bot.send_photo(**send_args, caption=caption)
-        else:
-            await bot.send_message(**send_args, text=caption)
+        from aiogram.types import BufferedInputFile
+        send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
+        await bot.send_photo(**send_args, caption=caption)
         await mark_listing_posted(car["guid"])
         badge = RARITY_NAMES[car["rarity"]]
-        return f"✅ #{vehicle_id} {car['year']} {car['make']} {car['model']} — {car['city']} {badge}"
+        title = get_car_title(car["make"], car["model"])
+        return f"✅ #{vehicle_id} {car['year']} {title} — {car['city']} {badge}"
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
@@ -415,7 +528,6 @@ async def auto_poster_loop(bot):
                     logger.info("Posting car for chat %s (interval=%s min, elapsed=%.0f sec)",
                                 chat_id, interval_min, elapsed)
                     ok = await post_new_car(bot, target, topic)
-                    # always update timestamp to prevent spam loop on errors
                     await set_config(last_key, str(now))
                     if ok:
                         errors = 0

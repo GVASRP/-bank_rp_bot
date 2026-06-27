@@ -1,6 +1,8 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+import random
+import time
 
 from database import (
     get_or_create_user,
@@ -14,9 +16,44 @@ from database import (
     update_balance,
     add_transaction,
 )
-from utils import format_amount, parse_amount, get_user_display, resolve_target, is_admin
+from database import get_job_category
+from utils import format_amount, parse_amount, is_admin, resolve_target
 
 router = Router()
+
+LAW_CATEGORIES = {"law", "legal", "government"}
+CRIME_CATEGORIES = {"criminal"}
+
+DELIVERY_LOCATIONS = [
+    "Shell (ул. Главная, 142)",
+    "Walmart Supercenter (ш. Мэдисон, 55)",
+    "Ферма Джонсона (Сельская дорога, 7)",
+    "Автосервис \"У Боба\" (Индустриальная, 23)",
+    "Больница Гринвилл (Медицинский пр., 15)",
+    "Аптека \"Здоровье\" (Медицинский пр., 17)",
+    "Склад №12 (Логистический пер., 4)",
+    "Порт Гринвилл (Набережная, 1)",
+    "McDonald's (ш. Мэдисон, 100)",
+    "Молочный завод WI (Индустриальная, 50)",
+    "Школа Гринвилл (Школьная, 10)",
+    "Полицейский участок (Центральная, 30)",
+    "Банк Wisconsin Trust (Центральная, 25)",
+    "АЗС BP (Окружная, 8)",
+    "Ресторан \"У озера\" (Озёрная, 12)",
+    "Отель Greenville Inn (Туристическая, 5)",
+    "Строительный двор (Строительная, 3)",
+    "Ферма Миллера (Олд-Роуд, 15)",
+]
+
+DELIVERY_GOODS = [
+    "продукты питания", "стройматериалы", "топливо", "медикаменты",
+    "мебель", "бытовая техника", "автозапчасти", "зерно",
+    "молочная продукция", "одежда", "электроника", "корма для скота",
+    "пиломатериалы", "химикаты", "напитки", "консервы",
+]
+
+_last_delivery = {}
+_last_crime = {}
 
 
 @router.message(Command("работа", prefix="!/"))
@@ -26,10 +63,52 @@ async def cmd_jobs(message: Message):
     if not jobs:
         await message.reply("📭 Нет доступных профессий")
         return
-    lines = ["💼 <b>Доступные профессии:</b>\n"]
+    civilian = []
+    law = []
+    medical = []
+    emergency = []
+    criminal = []
     for j in jobs:
-        lines.append(f"• <b>{j['name']}</b> — {format_amount(j['salary'])} долларов")
-    lines.append(f"\n💡 <code>!устроиться Название</code> — выбрать профессию")
+        cat = get_job_category(j["name"])
+        if cat == "law" or cat == "legal" or cat == "government":
+            law.append(j)
+        elif cat == "medical":
+            medical.append(j)
+        elif cat == "emergency":
+            emergency.append(j)
+        elif cat == "criminal":
+            criminal.append(j)
+        else:
+            civilian.append(j)
+
+    lines = ["💼 <b>Доступные профессии:</b>\n"]
+    if civilian:
+        lines.append("👔 <b>Гражданские:</b>")
+        for j in civilian:
+            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
+        lines.append("")
+    if law:
+        lines.append("👮 <b>Правоохранители и юристы:</b>")
+        for j in law:
+            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
+        lines.append("")
+    if emergency:
+        lines.append("🚒 <b>Экстренные службы:</b>")
+        for j in emergency:
+            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
+        lines.append("")
+    if medical:
+        lines.append("🏥 <b>Медицина:</b>")
+        for j in medical:
+            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
+        lines.append("")
+    if criminal:
+        lines.append("💀 <b>Криминал:</b>")
+        for j in criminal:
+            lines.append(f"  • {j['name']} — {format_amount(j['salary'])} $")
+        lines.append("")
+    lines.append("💡 <code>!устроиться Название</code> — выбрать профессию")
+    lines.append("💡 Зарплата выплачивается админом после сессии: <code>!зп @users</code>")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
@@ -52,7 +131,7 @@ async def cmd_take_job(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, chat_id=message.chat.id)
     await set_user_job(message.from_user.id, message.chat.id, job["id"])
     await message.reply(
-        f"✅ Вы устроились <b>{job['name']}</b>! Оклад: {format_amount(job['salary'])} долларов",
+        f"✅ Вы устроились <b>{job['name']}</b>! Оклад: {format_amount(job['salary'])} $",
         parse_mode="HTML",
     )
 
@@ -63,9 +142,18 @@ async def cmd_my_job(message: Message):
     if not job:
         await message.reply("💼 Вы пока безработный. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
         return
+    cat = get_job_category(job["name"])
+    extra = ""
+    if cat in CRIME_CATEGORIES:
+        extra = "\n💀 <code>!дело</code> — провернуть криминальное дело (в сессии)"
+    elif cat in LAW_CATEGORIES:
+        extra = "\n🔍 <code>!расследование</code> — провести расследование (в сессии)"
+    if job["name"] == "Дальнобойщик":
+        extra = "\n🚛 <code>!доставка</code> — совершить доставку между организациями"
     await message.reply(
         f"💼 <b>Ваша профессия:</b> {job['name']}\n"
-        f"💰 <b>Оклад:</b> {format_amount(job['salary'])} долларов",
+        f"💰 <b>Оклад:</b> {format_amount(job['salary'])} $\n"
+        f"👑 Зарплату выплачивает админ после сессии: <code>!зп @users</code>{extra}",
         parse_mode="HTML",
     )
 
@@ -98,7 +186,7 @@ async def cmd_change_salary(message: Message):
     if not ok:
         await message.reply(f"❌ Профессия \"{job_name}\" не найдена")
         return
-    await message.reply(f"✅ Оклад \"{job_name}\" изменён на {format_amount(amount)} долларов", parse_mode="HTML")
+    await message.reply(f"✅ Оклад \"{job_name}\" изменён на {format_amount(amount)} $", parse_mode="HTML")
 
 
 @router.message(Command("зп", prefix="!/"))
@@ -124,10 +212,10 @@ async def cmd_pay_salary(message: Message):
             continue
         await update_balance(target_id, job["salary"], message.chat.id)
         await add_transaction("salary", None, target_id, job["salary"],
-                              f"Зарплата: {job['name']} — {format_amount(job['salary'])}")
+                              f"Зарплата за сессию: {job['name']} — {format_amount(job['salary'])}")
         paid.append(f"{target_name} ({job['name']}) — {format_amount(job['salary'])}")
 
-    lines = [f"💵 <b>Выплата зарплаты</b>\n"]
+    lines = [f"💵 <b>Выплата зарплаты за сессию</b>\n"]
     if paid:
         lines.append("✅ <b>Получили:</b>")
         lines.extend(f"  • {p}" for p in paid)
@@ -136,4 +224,122 @@ async def cmd_pay_salary(message: Message):
         lines.extend(f"  • {n}" for n in not_found)
     if not paid and not not_found:
         lines.append("Нет пользователей для выплаты")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("дело", prefix="!/"))
+async def cmd_crime(message: Message):
+    job = await get_user_job_info(message.from_user.id, message.chat.id)
+    if not job:
+        await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
+        return
+    cat = get_job_category(job["name"])
+    if cat not in CRIME_CATEGORIES:
+        await message.reply("❌ Эта команда только для криминальных профессий")
+        return
+
+    now = time.time()
+    last = _last_crime.get(message.from_user.id, 0)
+    if now - last < 120:
+        left = int(120 - (now - last))
+        await message.reply(f"⏳ Подождите {left} сек перед следующим делом")
+        return
+    _last_crime[message.from_user.id] = now
+
+    crime_scenarios = [
+        f"Вы проникли в банк Wisconsin Trust через подвал. Взломали сейф и забрали наличные.",
+        f"Угнали BMW (BKM) с парковки у Walmart. Тачку уже разобрали на запчасти в порту.",
+        f"Перехватили груз фур на трассе I-41. Товар перегрузили на склад №12.",
+        f"Взломали сервер мэрии Гринвилл и скачали закрытые документы. Продали информацию.",
+        f"Организовали подпольное казино в отеле Greenville Inn. Налёт принёс прибыль.",
+        f"Переправили контрабанду через Порт Гринвилл. Таможня ничего не заметила.",
+        f"Обчистили дом мэра на Озёрной улице. Забрали украшения и наличку.",
+        f"Напоили охранника на заправке BP и украли кассу.",
+    ]
+
+    roll = random.randint(1, 100)
+    success = roll <= 50
+    scenario = random.choice(crime_scenarios)
+    lines = [f"💀 <b>Криминальное дело</b>\n"]
+    lines.append(f"📋 {scenario}")
+    if success:
+        lines.append(f"\n✅ <b>Успех!</b> Вы остались незамеченным.")
+    else:
+        lines.append(f"\n❌ <b>Провал!</b> Пришлось заметать следы. В этот раз не вышло.")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("расследование", prefix="!/"))
+async def cmd_investigate(message: Message):
+    job = await get_user_job_info(message.from_user.id, message.chat.id)
+    if not job:
+        await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
+        return
+    cat = get_job_category(job["name"])
+    if cat not in LAW_CATEGORIES:
+        await message.reply("❌ Эта команда только для правоохранителей и юристов")
+        return
+
+    invest_scenarios = [
+        f"Осмотрели место преступления на складе №12. Нашли отпечатки и гильзы.",
+        f"Допросили свидетелей у ресторана \"У озера\". Кто-то видел подозрительный фургон.",
+        f"Проверили камеры у банка Wisconsin Trust. Засветился угнанный пикап Durant.",
+        f"Устроили облаву в порту Гринвилл. Изъяли партию контрабанды.",
+        f"Проанализировали цифровые следы — хакер оставил лог на сервере мэрии.",
+        f"Проверили алиби подозреваемого. Он был в баре — чисто.",
+        f"Нашли схрон оружия в лесу за фермой Джонсона.",
+        f"Закрыли подпольную мастерскую по перебивке VIN-номеров.",
+    ]
+    outcome_scenarios = [
+        f"Преступник задержан и передан в суд!",
+        f"Улики собраны, дело готово к передаче прокурору.",
+        f"Обвиняемый сознался под давлением улик.",
+        f"Судья вынес приговор — преступник отправлен в тюрьму.",
+    ]
+
+    roll = random.randint(1, 100)
+    success = roll <= 55
+    scenario = random.choice(invest_scenarios)
+    outcome = random.choice(outcome_scenarios)
+    lines = [f"🔍 <b>Расследование</b>\n"]
+    lines.append(f"📋 {scenario}")
+    if success:
+        lines.append(f"\n✅ {outcome}")
+    else:
+        lines.append(f"\n❌ Недостаточно улик. Дело приостановлено.")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("доставка", prefix="!/"))
+async def cmd_delivery(message: Message):
+    job = await get_user_job_info(message.from_user.id, message.chat.id)
+    if not job:
+        await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
+        return
+    if job["name"] != "Дальнобойщик":
+        await message.reply("❌ Эта команда только для дальнобойщиков")
+        return
+
+    now = time.time()
+    last = _last_delivery.get(message.from_user.id, 0)
+    if now - last < 180:
+        left = int(180 - (now - last))
+        await message.reply(f"⏳ Вы уже в рейсе. Вернётесь через {left} сек")
+        return
+    _last_delivery[message.from_user.id] = now
+
+    origin = random.choice(DELIVERY_LOCATIONS)
+    dest = random.choice([l for l in DELIVERY_LOCATIONS if l != origin])
+    goods = random.choice(DELIVERY_GOODS)
+    distance = random.randint(15, 180)
+    weight = random.randint(500, 12000)
+
+    lines = [
+        f"🚛 <b>Доставка</b>\n",
+        f"📦 <b>Груз:</b> {goods} ({weight} кг)",
+        f"📍 <b>Откуда:</b> {origin}",
+        f"📍 <b>Куда:</b> {dest}",
+        f"🛣 <b>Расстояние:</b> {distance} миль\n",
+        f"📋 Отгрузили товар, получили накладную. Выезжаем!",
+    ]
     await message.reply("\n".join(lines), parse_mode="HTML")
