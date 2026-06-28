@@ -959,10 +959,7 @@ PURCHASABLE_VEHICLES = {
     'Zephyr': ['Vicieux'],
 }
 
-PURCHASABLE_SET = set()
-for make, models in PURCHASABLE_VEHICLES.items():
-    for model in models:
-        PURCHASABLE_SET.add((make, model))
+PURCHASABLE_SET = {(make.lower(), model.lower()) for make, models in PURCHASABLE_VEHICLES.items() for model in models}
 
 BRAND_TO_REAL = {
     'Acadia': 'Mitsubishi',
