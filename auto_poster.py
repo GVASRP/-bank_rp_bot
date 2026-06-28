@@ -2328,7 +2328,7 @@ async def send_house(bot, chat_id: int, house: dict, message_thread_id: int | No
         return True
     except Exception as e:
         logger.error("House send error: %s", e)
-        if "chat not found" in str(e).lower():
+        if "chat not found" in str(e).lower() or "forbidden" in str(e).lower():
             try:
                 await set_config(f"poster_houses_enabled:{chat_id}", "0")
             except Exception:

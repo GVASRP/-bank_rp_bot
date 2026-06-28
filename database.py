@@ -2935,6 +2935,9 @@ async def collect_rent(house_id: int) -> dict:
             if not row:
                 return {"ok": False, "reason": "not_rented"}
             h = dict(row)
+            from datetime import datetime
+            if h.get("rent_paid_at") and h["rent_paid_at"].startswith(datetime.now().strftime("%Y-%m-%d")):
+                return {"ok": True, "action": "skipped", "price": 0}
             bal_row = await conn.fetchrow(
                 "SELECT balance FROM users WHERE telegram_id = $1 AND chat_id = $2",
                 h["tenant_telegram_id"], h["chat_id"],
@@ -2977,6 +2980,9 @@ async def collect_rent(house_id: int) -> dict:
             if not row:
                 return {"ok": False, "reason": "not_rented"}
             h = dict(row)
+            if h.get("rent_paid_at") and h["rent_paid_at"].startswith(datetime.now().strftime("%Y-%m-%d")):
+                await conn.commit()
+                return {"ok": True, "action": "skipped", "price": 0}
             cur2 = await conn.execute(
                 "SELECT balance FROM users WHERE telegram_id = ? AND chat_id = ?",
                 (h["tenant_telegram_id"], h["chat_id"]),
@@ -3229,6 +3235,9 @@ async def collect_car_rent(vehicle_id: int) -> dict:
             if not row:
                 return {"ok": False, "reason": "not_rented"}
             v = dict(row)
+            from datetime import datetime
+            if v.get("rent_paid_at") and v["rent_paid_at"].startswith(datetime.now().strftime("%Y-%m-%d")):
+                return {"ok": True, "action": "skipped", "price": 0}
             bal_row = await conn.fetchrow(
                 "SELECT balance FROM users WHERE telegram_id = $1 AND chat_id = $2",
                 v["tenant_telegram_id"], v["chat_id"],
@@ -3271,6 +3280,9 @@ async def collect_car_rent(vehicle_id: int) -> dict:
             if not row:
                 return {"ok": False, "reason": "not_rented"}
             v = dict(row)
+            if v.get("rent_paid_at") and v["rent_paid_at"].startswith(datetime.now().strftime("%Y-%m-%d")):
+                await conn.commit()
+                return {"ok": True, "action": "skipped", "price": 0}
             cur2 = await conn.execute(
                 "SELECT balance FROM users WHERE telegram_id = ? AND chat_id = ?",
                 (v["tenant_telegram_id"], v["chat_id"]),
