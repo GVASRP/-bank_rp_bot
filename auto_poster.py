@@ -1326,7 +1326,10 @@ HOUSE_PRICE_VARIANTS = {
 
 
 def generate_house() -> dict:
-    ht_id = random.choice(list(range(1, 28)))
+    # Weighted: cheaper houses appear more often than mansions
+    _weights = [5, 3, 3, 3, 3, 2, 1, 3, 1, 3, 3, 2, 3,
+                1, 2, 3, 5, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2]
+    ht_id = random.choices(range(1, 28), weights=_weights)[0]
     ht = None
     for h in [
         (1, "Mobile Home", 3, 2.5, 900, "Самый бюджетный вариант."),
