@@ -23,7 +23,7 @@ from database import (
     is_org_member,
 )
 from auto_poster import generate_trailer, format_trailer_caption
-from utils import format_amount, parse_amount, resolve_target, parse_org_flag
+from utils import format_amount, parse_amount, resolve_target, parse_org_flag, parse_org_purchase
 
 router = Router()
 
@@ -67,10 +67,10 @@ async def cmd_trailers(message: Message):
 @router.message(Command("купить_прицеп", prefix="!/"))
 async def cmd_buy_trailer(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
-    org_id, clean_text = parse_org_flag(message.text)
+    org_id, own_org, clean_text = parse_org_purchase(message.text)
     args = clean_text.strip().split(maxsplit=1)
     if len(args) < 2:
-        usage = "<code>!купить_прицеп НОМЕР</code>" if not org_id else "<code>!купить_прицеп НОМЕР орг ID</code>"
+        usage = "<code>!купить_прицеп НОМЕР</code>" if not org_id else "<code>!купить_прицеп НОМЕР орг ID[ вл]</code>"
         await message.reply(f"❌ Использование: {usage}", parse_mode="HTML")
         return
     try:
@@ -106,7 +106,10 @@ async def cmd_buy_trailer(message: Message):
         return await update_balance(uid, -price, message.chat.id)
 
     if vehicle["status"] == "player_listed":
-        result = await buy_player_trailer(vehicle["id"], uid)
+        if own_org:
+            result = await buy_player_trailer(vehicle["id"], uid, org_id)
+        else:
+            result = await buy_player_trailer(vehicle["id"], uid)
         if not result:
             await message.reply("❌ Прицеп уже куплен")
             return
@@ -123,7 +126,7 @@ async def cmd_buy_trailer(message: Message):
         name = f"{vehicle['make']} {vehicle['model']}"
         await add_transaction("buy_trailer", None, uid, -price, f"Покупка прицепа {name} у игрока")
         await add_transaction("sell_trailer", None, seller_id, price, f"Продажа прицепа {name} игроку")
-        source = "🏢 Орг." if paid_with_org else ""
+        source = f"🏢 В собственность орг. #{org_id}" if own_org else (f"🏢 Орг. #{org_id}" if paid_with_org else "")
         await message.reply(
             f"✅ <b>Прицеп куплен у игрока</b>\n"
             f"🚛 {vehicle['year']} {vehicle['make']} {vehicle['model']}\n"
@@ -131,7 +134,10 @@ async def cmd_buy_trailer(message: Message):
             parse_mode="HTML",
         )
     else:
-        ok = await buy_trailer(vehicle["id"], uid)
+        if own_org:
+            ok = await buy_trailer(vehicle["id"], uid, org_id)
+        else:
+            ok = await buy_trailer(vehicle["id"], uid)
         if not ok:
             await message.reply("❌ Прицеп уже куплен")
             return
@@ -145,7 +151,7 @@ async def cmd_buy_trailer(message: Message):
             return
         name = f"{vehicle['make']} {vehicle['model']}"
         await add_transaction("buy_trailer", None, uid, -price, f"Покупка прицепа {name} на Truck Planet")
-        source = "🏢 Орг." if paid_with_org else ""
+        source = f"🏢 В собственность орг. #{org_id}" if own_org else (f"🏢 Орг. #{org_id}" if paid_with_org else "")
         await message.reply(
             f"✅ <b>Прицеп куплен</b>\n"
             f"🚛 {vehicle['year']} {vehicle['make']} {vehicle['model']}\n"

@@ -54,7 +54,7 @@ from database import (
     evict_car_tenant,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
-from utils import format_amount, parse_amount, get_user_display, parse_org_flag
+from utils import format_amount, parse_amount, get_user_display, parse_org_flag, parse_org_purchase
 
 router = Router()
 
@@ -128,10 +128,10 @@ async def cmd_vehicle_info(message: Message):
 
 @router.message(Command("купить", prefix="!/"))
 async def cmd_buy_car(message: Message):
-    org_id, clean_text = parse_org_flag(message.text)
+    org_id, own_org, clean_text = parse_org_purchase(message.text)
     args = clean_text.strip().split(maxsplit=1)
     if len(args) < 2:
-        usage = "<code>!купить номер</code>" if not org_id else "<code>!купить номер орг ID</code>"
+        usage = "<code>!купить номер</code>" if not org_id else "<code>!купить номер орг ID[ вл]</code>"
         await message.reply(f"❌ Использование: {usage}", parse_mode="HTML")
         return
     try:
@@ -166,6 +166,7 @@ async def cmd_buy_car(message: Message):
     price = v["price"]
     uid = message.from_user.id
     paid_with_org = False
+    target_org_id = org_id if own_org else None
 
     async def deduct():
         nonlocal paid_with_org
@@ -205,7 +206,7 @@ async def cmd_buy_car(message: Message):
         await add_transaction("buy_car", uid, seller_id, price,
                               f"Покупка у игрока #{v['id']} {v['year']} {v['make']} {v['model']}")
         seller_name = get_user_display(await get_user_by_telegram_id(seller_id))
-        source = f"🏢 Орг. #{org_id}" if paid_with_org else ""
+        source = f"🏢 В собственность орг. #{org_id}" if own_org else (f"🏢 Орг. #{org_id}" if paid_with_org else "")
         await message.reply(
             f"✅ Вы купили у {seller_name} <b>{v['year']} {v['make']} {v['model']}</b>!\n"
             f"💰 Цена: ${price:,}{' | ' + source if source else ''}\n"
@@ -214,14 +215,18 @@ async def cmd_buy_car(message: Message):
             parse_mode="HTML",
         )
     else:
-        if not await buy_vehicle(v["id"], uid):
+        if own_org:
+            ok = await buy_vehicle(v["id"], uid, org_id)
+        else:
+            ok = await buy_vehicle(v["id"], uid)
+        if not ok:
             await refund()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
             return
         await add_transaction("buy_car", uid, None, price,
                               f"Покупка из салона #{v['id']} {v['year']} {v['make']} {v['model']}")
         new_bal = await get_user_by_telegram_id(uid, message.chat.id)
-        source = f"🏢 Орг. #{org_id}" if paid_with_org else ""
+        source = f"🏢 В собственность орг. #{org_id}" if own_org else (f"🏢 Орг. #{org_id}" if paid_with_org else "")
         await message.reply(
             f"✅ Вы купили <b>{v['year']} {v['make']} {v['model']}</b>!\n"
             f"💰 Цена: ${price:,}{' | ' + source if source else ''}\n"
@@ -568,10 +573,10 @@ async def cmd_house_info(message: Message):
 
 @router.message(Command("купить_дом", prefix="!/"))
 async def cmd_buy_house(message: Message):
-    org_id, clean_text = parse_org_flag(message.text)
+    org_id, own_org, clean_text = parse_org_purchase(message.text)
     args = clean_text.strip().split(maxsplit=1)
     if len(args) < 2:
-        usage = "<code>!купить_дом НОМЕР</code>" if not org_id else "<code>!купить_дом НОМЕР орг ID</code>"
+        usage = "<code>!купить_дом НОМЕР</code>" if not org_id else "<code>!купить_дом НОМЕР орг ID[ вл]</code>"
         await message.reply(f"❌ Использование: {usage}", parse_mode="HTML")
         return
     try:
@@ -632,7 +637,10 @@ async def cmd_buy_house(message: Message):
         return
 
     if h["status"] == "player_listed":
-        result = await buy_player_house(hid, uid)
+        if own_org:
+            result = await buy_player_house(hid, uid, org_id)
+        else:
+            result = await buy_player_house(hid, uid)
         if not result:
             await refund_()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
@@ -642,20 +650,24 @@ async def cmd_buy_house(message: Message):
         await add_transaction("buy_house", uid, seller_id, price,
                               f"Покупка дома у игрока #{hid} {h['type_name']}")
         seller_name = get_user_display(await get_user_by_telegram_id(seller_id))
-        source = "🏢 Орг." if paid_with_org else ""
+        source = f"🏢 В собственность орг. #{org_id}" if own_org else (f"🏢 Орг. #{org_id}" if paid_with_org else "")
         await message.reply(
             f"✅ Вы купили у {seller_name} <b>{h['type_name']}</b>!\n"
             f"💰 Цена: ${price:,}{' | ' + source if source else ''}",
             parse_mode="HTML",
         )
     else:
-        if not await buy_house(hid, uid):
+        if own_org:
+            ok = await buy_house(hid, uid, org_id)
+        else:
+            ok = await buy_house(hid, uid)
+        if not ok:
             await refund_()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
             return
         await add_transaction("buy_house", uid, None, price,
                               f"Покупка дома #{hid} {h['type_name']}")
-        source = "🏢 Орг." if paid_with_org else ""
+        source = f"🏢 В собственность орг. #{org_id}" if own_org else (f"🏢 Орг. #{org_id}" if paid_with_org else "")
         await message.reply(
             f"✅ Вы купили <b>{h['type_name']}</b>!\n"
             f"📍 <b>{h['neighborhood']}</b>\n"

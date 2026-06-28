@@ -24,6 +24,14 @@ def parse_org_flag(text: str) -> tuple[int | None, str]:
     return None, text
 
 
+def parse_org_purchase(text: str) -> tuple[int | None, bool, str]:
+    import re
+    m = re.search(r'\s+(?:орг|org)\s+(\d+)(?:\s+(вл|own))?\s*$', text, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), bool(m.group(2)), text[:m.start()]
+    return None, False, text
+
+
 def parse_amount(text: str) -> int | None:
     text = text.replace(" ", "").replace(",", ".").strip()
     try:

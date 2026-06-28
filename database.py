@@ -155,6 +155,10 @@ async def init_db():
         except Exception:
             pass
         try:
+            await conn.execute("ALTER TABLE vehicles ADD COLUMN org_id BIGINT DEFAULT NULL")
+        except Exception:
+            pass
+        try:
             await seed_house_types()
         except Exception:
             pass
@@ -209,6 +213,7 @@ async def init_db():
                 color TEXT DEFAULT '',
                 rarity TEXT DEFAULT 'common',
                 owner_telegram_id BIGINT,
+                org_id BIGINT DEFAULT NULL,
                 status TEXT DEFAULT 'available',
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
@@ -227,6 +232,7 @@ async def init_db():
                 description TEXT,
                 photo_url TEXT,
                 owner_telegram_id BIGINT,
+                org_id BIGINT DEFAULT NULL,
                 status TEXT DEFAULT 'available',
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
@@ -263,6 +269,10 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE houses ADD COLUMN {col[0]} {col[1]}")
             except Exception:
                 pass
+        try:
+            await conn.execute("ALTER TABLE houses ADD COLUMN org_id BIGINT DEFAULT NULL")
+        except Exception:
+            pass
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS job_roles (
                 id SERIAL PRIMARY KEY,
@@ -371,6 +381,7 @@ async def init_db():
                     color TEXT DEFAULT '',
                     rarity TEXT DEFAULT 'common',
                     owner_telegram_id INTEGER,
+                    org_id INTEGER DEFAULT NULL,
                     status TEXT DEFAULT 'available',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
@@ -387,6 +398,7 @@ async def init_db():
                     description TEXT,
                     photo_url TEXT,
                     owner_telegram_id INTEGER,
+                    org_id INTEGER DEFAULT NULL,
                     status TEXT DEFAULT 'available',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
@@ -498,8 +510,13 @@ async def init_db():
                 await conn.commit()
             except Exception:
                     pass
+            try:
+                await conn.execute("ALTER TABLE vehicles ADD COLUMN org_id INTEGER DEFAULT NULL")
+                await conn.commit()
+            except Exception:
+                pass
             # Migration: add chat_id, neighborhood, house_type_id, neighborhood_id, guid, rent columns to houses
-            for col in ("chat_id INTEGER DEFAULT 0", "neighborhood TEXT DEFAULT ''", "house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT", "rent_price INTEGER DEFAULT 0", "tenant_telegram_id INTEGER", "rent_paid_at TEXT", "rent_missed_days INTEGER DEFAULT 0"):
+            for col in ("chat_id INTEGER DEFAULT 0", "neighborhood TEXT DEFAULT ''", "house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT", "rent_price INTEGER DEFAULT 0", "tenant_telegram_id INTEGER", "rent_paid_at TEXT", "rent_missed_days INTEGER DEFAULT 0", "org_id INTEGER DEFAULT NULL"):
                 try:
                     await conn.execute(f"ALTER TABLE houses ADD COLUMN {col}")
                     await conn.commit()
@@ -1763,7 +1780,7 @@ async def unlist_vehicle(vehicle_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def buy_player_vehicle(vehicle_id: int, buyer_id: int) -> bool:
+async def buy_player_vehicle(vehicle_id: int, buyer_id: int, org_id: int | None = None) -> tuple | bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -1776,8 +1793,8 @@ async def buy_player_vehicle(vehicle_id: int, buyer_id: int) -> bool:
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
-                buyer_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
+                buyer_id, org_id, vehicle_id,
             )
             return seller_id, price
         else:
@@ -1790,8 +1807,8 @@ async def buy_player_vehicle(vehicle_id: int, buyer_id: int) -> bool:
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
-                (buyer_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
+                (buyer_id, org_id, vehicle_id),
             )
             await conn.commit()
             return seller_id, price
@@ -1864,7 +1881,7 @@ async def create_trailer(make: str, model: str, year: int, price: int, miles: in
         await conn.close()
 
 
-async def buy_trailer(vehicle_id: int, telegram_id: int) -> bool:
+async def buy_trailer(vehicle_id: int, telegram_id: int, org_id: int | None = None) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -1875,8 +1892,8 @@ async def buy_trailer(vehicle_id: int, telegram_id: int) -> bool:
             if not row:
                 return False
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
-                telegram_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
+                telegram_id, org_id, vehicle_id,
             )
             return True
         else:
@@ -1888,8 +1905,8 @@ async def buy_trailer(vehicle_id: int, telegram_id: int) -> bool:
             if not row:
                 return False
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
-                (telegram_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
+                (telegram_id, org_id, vehicle_id),
             )
             await conn.commit()
             return True
@@ -1990,7 +2007,7 @@ async def unlist_trailer(vehicle_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def buy_player_trailer(vehicle_id: int, buyer_id: int) -> bool:
+async def buy_player_trailer(vehicle_id: int, buyer_id: int, org_id: int | None = None) -> tuple | bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -2003,8 +2020,8 @@ async def buy_player_trailer(vehicle_id: int, buyer_id: int) -> bool:
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
-                buyer_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
+                buyer_id, org_id, vehicle_id,
             )
             return seller_id, price
         else:
@@ -2018,8 +2035,8 @@ async def buy_player_trailer(vehicle_id: int, buyer_id: int) -> bool:
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
-                (buyer_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
+                (buyer_id, org_id, vehicle_id),
             )
             await conn.commit()
             return seller_id, price
@@ -2125,21 +2142,27 @@ async def get_vehicle_by_position(chat_id: int, position: int) -> dict | None:
     return vehicles[position - 1]
 
 
-async def buy_vehicle(vehicle_id: int, telegram_id: int) -> bool:
+async def buy_vehicle(vehicle_id: int, telegram_id: int, org_id: int | None = None) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND status = 'available' FOR UPDATE", vehicle_id)
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2", telegram_id, vehicle_id)
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
+                telegram_id, org_id, vehicle_id,
+            )
             return True
         else:
             cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND status = 'available'", (vehicle_id,))
             row = await cursor.fetchone()
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?", (telegram_id, vehicle_id))
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
+                (telegram_id, org_id, vehicle_id),
+            )
             await conn.commit()
             return True
     finally:
@@ -2531,7 +2554,7 @@ async def unlist_house(house_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def buy_player_house(house_id: int, buyer_id: int):
+async def buy_player_house(house_id: int, buyer_id: int, org_id: int | None = None):
     conn = await get_conn()
     try:
         if _is_pg:
@@ -2544,8 +2567,8 @@ async def buy_player_house(house_id: int, buyer_id: int):
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE houses SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
-                buyer_id, house_id,
+                "UPDATE houses SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
+                buyer_id, org_id, house_id,
             )
             return seller_id, price
         else:
@@ -2558,8 +2581,8 @@ async def buy_player_house(house_id: int, buyer_id: int):
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE houses SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
-                (buyer_id, house_id),
+                "UPDATE houses SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
+                (buyer_id, org_id, house_id),
             )
             await conn.commit()
             return seller_id, price
@@ -2679,21 +2702,27 @@ async def get_user_houses(telegram_id: int, chat_id: int) -> list:
         await conn.close()
 
 
-async def buy_house(house_id: int, telegram_id: int) -> bool:
+async def buy_house(house_id: int, telegram_id: int, org_id: int | None = None) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow("SELECT * FROM houses WHERE id = $1 AND status = 'available' FOR UPDATE", house_id)
             if not row:
                 return False
-            await conn.execute("UPDATE houses SET owner_telegram_id = $1, status = 'sold' WHERE id = $2", telegram_id, house_id)
+            await conn.execute(
+                "UPDATE houses SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
+                telegram_id, org_id, house_id,
+            )
             return True
         else:
             cursor = await conn.execute("SELECT * FROM houses WHERE id = ? AND status = 'available'", (house_id,))
             row = await cursor.fetchone()
             if not row:
                 return False
-            await conn.execute("UPDATE houses SET owner_telegram_id = ?, status = 'sold' WHERE id = ?", (telegram_id, house_id))
+            await conn.execute(
+                "UPDATE houses SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
+                (telegram_id, org_id, house_id),
+            )
             await conn.commit()
             return True
     finally:
@@ -3638,6 +3667,63 @@ async def refund_org(org_id: int, user_id: int, amount: int, chat_id: int, descr
         return True
     except Exception:
         return False
+    finally:
+        await conn.close()
+
+
+async def get_org_vehicles(org_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM vehicles WHERE org_id = $1 AND status = 'sold' AND vehicle_type = 'car'",
+                org_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE org_id = ? AND status = 'sold' AND vehicle_type = 'car'",
+                (org_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_org_houses(org_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM houses WHERE org_id = $1 AND status = 'sold'",
+                org_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE org_id = ? AND status = 'sold'",
+                (org_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_org_trailers(org_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM vehicles WHERE org_id = $1 AND status = 'sold' AND vehicle_type = 'trailer'",
+                org_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE org_id = ? AND status = 'sold' AND vehicle_type = 'trailer'",
+                (org_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
 

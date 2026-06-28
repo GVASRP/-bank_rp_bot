@@ -14,6 +14,9 @@ from database import (
     is_org_owner,
     update_balance,
     add_transaction,
+    get_org_vehicles,
+    get_org_houses,
+    get_org_trailers,
 )
 from utils import format_amount, parse_amount, resolve_target
 
@@ -89,16 +92,23 @@ async def cmd_org_info(message: Message):
         icon = "👑" if m["role"] == "owner" else "👤"
         name = m.get("name") or f"id{m['telegram_id']}"
         member_lines.append(f"  {icon} {name}")
+    vehicles_count = len(await get_org_vehicles(org_id))
+    houses_count = len(await get_org_houses(org_id))
+    trailers_count = len(await get_org_trailers(org_id))
     await message.reply(
         f"🏢 <b>{org['name']}</b>\n"
         f"🆔 ID: <code>{org['id']}</code>\n"
-        f"💰 Баланс: <b>${org['balance']:,}</b>\n\n"
+        f"💰 Баланс: <b>${org['balance']:,}</b>\n"
+        f"🚗 Авто: {vehicles_count} | 🏠 Дома: {houses_count} | 🚛 Прицепы: {trailers_count}\n\n"
         f"👥 <b>Участники ({len(members)}):</b>\n" + "\n".join(member_lines) +
         f"\n\n"
         f"<code>!орг_пополнить {org_id} сумма</code> — пополнить с баланса\n"
         f"<code>!орг_вывести {org_id} сумма</code> — вывести на баланс\n"
         f"<code>!орг_добавить {org_id} @user</code> — добавить участника\n"
-        f"<code>!орг_удалить {org_id} @user</code> — удалить участника",
+        f"<code>!орг_удалить {org_id} @user</code> — удалить участника\n"
+        f"<code>!орг_авто {org_id}</code> — имущество (авто)\n"
+        f"<code>!орг_дома {org_id}</code> — имущество (дома)\n"
+        f"<code>!орг_прицепы {org_id}</code> — имущество (прицепы)",
         parse_mode="HTML",
     )
 
@@ -280,3 +290,87 @@ async def cmd_org_remove_member(message: Message):
         f"✅ {target_name} удалён из организации <b>{org['name']}</b>",
         parse_mode="HTML",
     )
+
+
+@router.message(Command("орг_авто", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_org_vehicles(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!орг_авто ID</code>", parse_mode="HTML")
+        return
+    try:
+        org_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    if not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
+        return
+    org = await get_org(org_id)
+    if not org:
+        await message.reply("❌ Организация не найдена")
+        return
+    vehicles = await get_org_vehicles(org_id)
+    if not vehicles:
+        await message.reply(f"🏢 <b>{org['name']}</b> — нет автомобилей", parse_mode="HTML")
+        return
+    lines = [f"🏢 <b>{org['name']}</b> — автомобили:\n"]
+    for idx, v in enumerate(vehicles, 1):
+        lines.append(f"#{idx} {v['year']} {v['make']} {v['model']} — ${v['price']:,}")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("орг_дома", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_org_houses(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!орг_дома ID</code>", parse_mode="HTML")
+        return
+    try:
+        org_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    if not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
+        return
+    org = await get_org(org_id)
+    if not org:
+        await message.reply("❌ Организация не найдена")
+        return
+    houses = await get_org_houses(org_id)
+    if not houses:
+        await message.reply(f"🏢 <b>{org['name']}</b> — нет домов", parse_mode="HTML")
+        return
+    lines = [f"🏢 <b>{org['name']}</b> — дома:\n"]
+    for idx, h in enumerate(houses, 1):
+        lines.append(f"#{idx} {h['type_name']} ({h['neighborhood']}) — ${h['price']:,}")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("орг_прицепы", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_org_trailers(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!орг_прицепы ID</code>", parse_mode="HTML")
+        return
+    try:
+        org_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    if not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
+        return
+    org = await get_org(org_id)
+    if not org:
+        await message.reply("❌ Организация не найдена")
+        return
+    trailers = await get_org_trailers(org_id)
+    if not trailers:
+        await message.reply(f"🏢 <b>{org['name']}</b> — нет прицепов", parse_mode="HTML")
+        return
+    lines = [f"🏢 <b>{org['name']}</b> — прицепы:\n"]
+    for idx, t in enumerate(trailers, 1):
+        lines.append(f"#{idx} {t['year']} {t['make']} {t['model']} — ${t['price']:,}")
+    await message.reply("\n".join(lines), parse_mode="HTML")
