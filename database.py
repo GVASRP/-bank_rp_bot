@@ -222,7 +222,7 @@ async def init_db():
                 name TEXT NOT NULL
             )
         """)
-        for col in (("chat_id", "BIGINT DEFAULT 0"), ("neighborhood", "TEXT DEFAULT ''"), ("house_type_id", "INTEGER"), ("neighborhood_id", "INTEGER"), ("guid", "TEXT")):
+        for col in (("chat_id", "BIGINT DEFAULT 0"), ("neighborhood", "TEXT DEFAULT ''"), ("house_type_id", "INTEGER"), ("neighborhood_id", "INTEGER"), ("guid", "TEXT"), ("rent_price", "INTEGER DEFAULT 0"), ("tenant_telegram_id", "BIGINT"), ("rent_paid_at", "TEXT"), ("rent_missed_days", "INTEGER DEFAULT 0")):
             try:
                 await conn.execute(f"ALTER TABLE houses ADD COLUMN {col[0]} {col[1]}")
             except Exception:
@@ -441,8 +441,8 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
-            # Migration: add chat_id, neighborhood, house_type_id, neighborhood_id, guid to houses
-            for col in ("chat_id INTEGER DEFAULT 0", "neighborhood TEXT DEFAULT ''", "house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT"):
+            # Migration: add chat_id, neighborhood, house_type_id, neighborhood_id, guid, rent columns to houses
+            for col in ("chat_id INTEGER DEFAULT 0", "neighborhood TEXT DEFAULT ''", "house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT", "rent_price INTEGER DEFAULT 0", "tenant_telegram_id INTEGER", "rent_paid_at TEXT", "rent_missed_days INTEGER DEFAULT 0"):
                 try:
                     await conn.execute(f"ALTER TABLE houses ADD COLUMN {col}")
                     await conn.commit()
@@ -2466,6 +2466,319 @@ async def delete_house(house_id: int) -> bool:
             return True
     finally:
         await conn.close()
+
+
+# ─── Rental system ─────────────────────────────────────────────
+
+
+async def list_house_for_rent(house_id: int, owner_id: int, rent_price: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' AND (rent_price IS NULL OR rent_price = 0) FOR UPDATE",
+                house_id, owner_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE houses SET rent_price = $1 WHERE id = $2",
+                rent_price, house_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND owner_telegram_id = ? AND status = 'sold' AND (rent_price IS NULL OR rent_price = 0)",
+                (house_id, owner_id),
+            )
+            if not cursor.fetchone():
+                return False
+            await conn.execute(
+                "UPDATE houses SET rent_price = ? WHERE id = ?",
+                (rent_price, house_id),
+            )
+            await conn.commit()
+        return True
+    finally:
+        await conn.close()
+
+
+async def unlist_house_rent(house_id: int, owner_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND owner_telegram_id = $2 AND tenant_telegram_id IS NULL AND rent_price > 0 FOR UPDATE",
+                house_id, owner_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE houses SET rent_price = 0 WHERE id = $1",
+                house_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND owner_telegram_id = ? AND tenant_telegram_id IS NULL AND rent_price > 0",
+                (house_id, owner_id),
+            )
+            if not cursor.fetchone():
+                return False
+            await conn.execute(
+                "UPDATE houses SET rent_price = 0 WHERE id = ?",
+                (house_id,),
+            )
+            await conn.commit()
+        return True
+    finally:
+        await conn.close()
+
+
+async def get_for_rent_houses(chat_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM houses WHERE chat_id = $1 AND rent_price > 0 AND tenant_telegram_id IS NULL ORDER BY rent_price ASC",
+                chat_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE chat_id = ? AND rent_price > 0 AND tenant_telegram_id IS NULL ORDER BY rent_price ASC",
+                (chat_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def rent_house(house_id: int, tenant_id: int) -> tuple[bool, str]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND rent_price > 0 AND tenant_telegram_id IS NULL FOR UPDATE",
+                house_id,
+            )
+            if not row:
+                return False, "Дом недоступен для аренды"
+            h = dict(row)
+            bal_row = await conn.fetchrow(
+                "SELECT balance FROM users WHERE telegram_id = $1 AND chat_id = $2",
+                tenant_id, h["chat_id"],
+            )
+            if not bal_row or bal_row["balance"] < h["rent_price"]:
+                return False, f"Недостаточно средств. Аренда: ${h['rent_price']:,}/день"
+            await conn.execute(
+                "UPDATE users SET balance = balance - $1 WHERE telegram_id = $2 AND chat_id = $3",
+                h["rent_price"], tenant_id, h["chat_id"],
+            )
+            await conn.execute(
+                "UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 AND chat_id = $3",
+                h["rent_price"], h["owner_telegram_id"], h["chat_id"],
+            )
+            await conn.execute(
+                "UPDATE houses SET tenant_telegram_id = $1, rent_paid_at = to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'), rent_missed_days = 0 WHERE id = $2",
+                tenant_id, house_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND rent_price > 0 AND tenant_telegram_id IS NULL",
+                (house_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False, "Дом недоступен для аренды"
+            h = dict(row)
+            cur2 = await conn.execute(
+                "SELECT balance FROM users WHERE telegram_id = ? AND chat_id = ?",
+                (tenant_id, h["chat_id"]),
+            )
+            bal_row = cur2.fetchone()
+            if not bal_row or bal_row[0] < h["rent_price"]:
+                return False, f"Недостаточно средств. Аренда: ${h['rent_price']:,}/день"
+            await conn.execute(
+                "UPDATE users SET balance = balance - ? WHERE telegram_id = ? AND chat_id = ?",
+                (h["rent_price"], tenant_id, h["chat_id"]),
+            )
+            await conn.execute(
+                "UPDATE users SET balance = balance + ? WHERE telegram_id = ? AND chat_id = ?",
+                (h["rent_price"], h["owner_telegram_id"], h["chat_id"]),
+            )
+            from datetime import datetime
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await conn.execute(
+                "UPDATE houses SET tenant_telegram_id = ?, rent_paid_at = ?, rent_missed_days = 0 WHERE id = ?",
+                (tenant_id, now_str, house_id),
+            )
+            await conn.commit()
+        return True, f"✅ Вы арендовали {h['type_name']} (${h['rent_price']:,}/день)"
+    finally:
+        await conn.close()
+
+
+async def get_tenant_house(telegram_id: int, chat_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE tenant_telegram_id = $1 AND chat_id = $2",
+                telegram_id, chat_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE tenant_telegram_id = ? AND chat_id = ?",
+                (telegram_id, chat_id),
+            )
+            row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def evict_tenant(house_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND tenant_telegram_id IS NOT NULL FOR UPDATE",
+                house_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE houses SET tenant_telegram_id = NULL, rent_paid_at = NULL, rent_missed_days = 0 WHERE id = $1",
+                house_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND tenant_telegram_id IS NOT NULL",
+                (house_id,),
+            )
+            if not cursor.fetchone():
+                return False
+            await conn.execute(
+                "UPDATE houses SET tenant_telegram_id = NULL, rent_paid_at = NULL, rent_missed_days = 0 WHERE id = ?",
+                (house_id,),
+            )
+            await conn.commit()
+        return True
+    finally:
+        await conn.close()
+
+
+async def get_all_rented_houses() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM houses WHERE tenant_telegram_id IS NOT NULL",
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE tenant_telegram_id IS NOT NULL",
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def collect_rent(house_id: int) -> dict:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND tenant_telegram_id IS NOT NULL FOR UPDATE",
+                house_id,
+            )
+            if not row:
+                return {"ok": False, "reason": "not_rented"}
+            h = dict(row)
+            bal_row = await conn.fetchrow(
+                "SELECT balance FROM users WHERE telegram_id = $1 AND chat_id = $2",
+                h["tenant_telegram_id"], h["chat_id"],
+            )
+            if bal_row and bal_row["balance"] >= h["rent_price"]:
+                await conn.execute(
+                    "UPDATE users SET balance = balance - $1 WHERE telegram_id = $2 AND chat_id = $3",
+                    h["rent_price"], h["tenant_telegram_id"], h["chat_id"],
+                )
+                await conn.execute(
+                    "UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 AND chat_id = $3",
+                    h["rent_price"], h["owner_telegram_id"], h["chat_id"],
+                )
+                await conn.execute(
+                    "UPDATE houses SET rent_paid_at = to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'), rent_missed_days = 0 WHERE id = $1",
+                    house_id,
+                )
+                return {"ok": True, "action": "collected", "price": h["rent_price"]}
+            else:
+                missed = (h["rent_missed_days"] or 0) + 1
+                if missed >= 3:
+                    await conn.execute(
+                        "UPDATE houses SET tenant_telegram_id = NULL, rent_paid_at = NULL, rent_missed_days = 0 WHERE id = $1",
+                        house_id,
+                    )
+                    return {"ok": True, "action": "evicted", "missed": missed}
+                else:
+                    await conn.execute(
+                        "UPDATE houses SET rent_missed_days = $1 WHERE id = $2",
+                        missed, house_id,
+                    )
+                    return {"ok": True, "action": "missed", "missed": missed}
+        else:
+            from datetime import datetime
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND tenant_telegram_id IS NOT NULL",
+                (house_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"ok": False, "reason": "not_rented"}
+            h = dict(row)
+            cur2 = await conn.execute(
+                "SELECT balance FROM users WHERE telegram_id = ? AND chat_id = ?",
+                (h["tenant_telegram_id"], h["chat_id"]),
+            )
+            bal_row = cur2.fetchone()
+            if bal_row and bal_row[0] >= h["rent_price"]:
+                await conn.execute(
+                    "UPDATE users SET balance = balance - ? WHERE telegram_id = ? AND chat_id = ?",
+                    (h["rent_price"], h["tenant_telegram_id"], h["chat_id"]),
+                )
+                await conn.execute(
+                    "UPDATE users SET balance = balance + ? WHERE telegram_id = ? AND chat_id = ?",
+                    (h["rent_price"], h["owner_telegram_id"], h["chat_id"]),
+                )
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                await conn.execute(
+                    "UPDATE houses SET rent_paid_at = ?, rent_missed_days = 0 WHERE id = ?",
+                    (now_str, house_id),
+                )
+                await conn.commit()
+                return {"ok": True, "action": "collected", "price": h["rent_price"]}
+            else:
+                missed = (h["rent_missed_days"] or 0) + 1
+                if missed >= 3:
+                    await conn.execute(
+                        "UPDATE houses SET tenant_telegram_id = NULL, rent_paid_at = NULL, rent_missed_days = 0 WHERE id = ?",
+                        (house_id,),
+                    )
+                    await conn.commit()
+                    return {"ok": True, "action": "evicted", "missed": missed}
+                else:
+                    await conn.execute(
+                        "UPDATE houses SET rent_missed_days = ? WHERE id = ?",
+                        (missed, house_id),
+                    )
+                    await conn.commit()
+                    return {"ok": True, "action": "missed", "missed": missed}
+    finally:
+        await conn.close()
+
+
+# ────────────────────────────────────────────────────────────────
 
 
 async def get_all_users_ranked(chat_id: int | None = None) -> list:

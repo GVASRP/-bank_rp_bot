@@ -36,6 +36,12 @@ from database import (
     buy_player_house,
     get_player_listed_houses,
     create_house_listing,
+    list_house_for_rent,
+    unlist_house_rent,
+    get_for_rent_houses,
+    rent_house,
+    get_tenant_house,
+    evict_tenant,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
 from utils import format_amount, parse_amount, get_user_display
@@ -718,3 +724,179 @@ async def cmd_house_container(message: Message):
         f"🛏 {house['bedrooms']} спальни | 🛁 {house['bathrooms']} ванны | 📐 {house['sqft']:,} кв.футов",
         parse_mode="HTML",
     )
+
+
+# ─── Rental system ─────────────────────────────────────────────
+
+
+@router.message(Command("сдать_дом", prefix="!/"))
+async def cmd_rent_out_house(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 3:
+        await message.reply("❌ Использование: <code>!сдать_дом НОМЕР цена_в_день</code>", parse_mode="HTML")
+        return
+    try:
+        position = int(args[1])
+        rent_price = int(args[2])
+    except ValueError:
+        await message.reply("❌ Номер дома и цена должны быть числами")
+        return
+    if rent_price < 100:
+        await message.reply("❌ Минимальная цена аренды: $100/день")
+        return
+    houses = await get_user_houses(message.from_user.id, message.chat.id)
+    if position < 1 or position > len(houses):
+        await message.reply(f"❌ У вас нет дома с номером {position}")
+        return
+    h = houses[position - 1]
+    if h["status"] != "sold":
+        await message.reply("❌ Этот дом уже выставлен на продажу")
+        return
+    ok = await list_house_for_rent(h["id"], message.from_user.id, rent_price)
+    if not ok:
+        await message.reply("❌ Не удалось сдать дом. Возможно, он уже сдан или продан")
+        return
+    await message.reply(
+        f"✅ <b>{h['type_name']}</b> сдан в аренду за ${rent_price:,}/день\n"
+        f"👥 Игроки могут заселиться через <code>!арендовать {position}</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("снять_с_аренды", prefix="!/"))
+async def cmd_unlist_rent(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!снять_с_аренды НОМЕР</code>", parse_mode="HTML")
+        return
+    try:
+        position = int(args[1])
+    except ValueError:
+        await message.reply("❌ Номер дома должен быть числом")
+        return
+    houses = await get_user_houses(message.from_user.id, message.chat.id)
+    if position < 1 or position > len(houses):
+        await message.reply(f"❌ У вас нет дома с номером {position}")
+        return
+    h = houses[position - 1]
+    ok = await unlist_house_rent(h["id"], message.from_user.id)
+    if not ok:
+        await message.reply("❌ Дом не сдан в аренду или в нём живут")
+        return
+    await message.reply(f"✅ <b>{h['type_name']}</b> снят с аренды")
+
+
+@router.message(Command("арендовать", prefix="!/"))
+async def cmd_rent_house(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!арендовать НОМЕР</code>", parse_mode="HTML")
+        return
+    try:
+        position = int(args[1])
+    except ValueError:
+        await message.reply("❌ Номер дома должен быть числом")
+        return
+    existing = await get_tenant_house(message.from_user.id, message.chat.id)
+    if existing:
+        await message.reply(
+            f"❌ Вы уже арендуете <b>{existing['type_name']}</b>. Сначала съедьте: <code>!съехать</code>",
+            parse_mode="HTML",
+        )
+        return
+    rentals = await get_for_rent_houses(message.chat.id)
+    # Include owned houses listed for rent too
+    owned_rentals = [h for h in await get_user_houses(message.from_user.id, message.chat.id) if h.get("rent_price", 0) > 0 and h["status"] == "sold" and not h.get("tenant_telegram_id")]
+    all_rentals = rentals + owned_rentals
+    # Get user's own houses that are for rent to exclude from rentable list
+    my_ids = {h["id"] for h in await get_user_houses(message.from_user.id, message.chat.id)}
+    rentable = [h for h in all_rentals if h["id"] not in my_ids]
+    if position < 1 or position > len(rentable):
+        await message.reply(f"❌ Нет дома с номером {position} в списке аренды")
+        return
+    h = rentable[position - 1]
+    ok, msg = await rent_house(h["id"], message.from_user.id)
+    if ok:
+        nb = h.get("neighborhood", "")
+        emoji = NEIGHBORHOOD_EMOJIS.get(nb, "🏠")
+        await message.reply(
+            f"✅ <b>Вы арендовали дом!</b>\n\n"
+            f"🏠 {h['type_name']}\n"
+            f"{emoji} <b>{nb}</b>\n"
+            f"💰 ${h['rent_price']:,}/день\n"
+            f"🛏 {h['bedrooms']} спальни | 🛁 {h['bathrooms']} ванны\n\n"
+            f"💡 Плата списывается ежедневно. Проверить: <code>!моя_аренда</code>\n"
+            f"🚪 Съехать: <code>!съехать</code>",
+            parse_mode="HTML",
+        )
+    else:
+        await message.reply(f"❌ {msg}", parse_mode="HTML")
+
+
+@router.message(Command("моя_аренда", prefix="!/"))
+async def cmd_my_rent(message: Message):
+    h = await get_tenant_house(message.from_user.id, message.chat.id)
+    if not h:
+        await message.reply("❌ Вы не арендуете дом")
+        return
+    nb = h.get("neighborhood", "")
+    emoji = NEIGHBORHOOD_EMOJIS.get(nb, "🏠")
+    from datetime import datetime
+    paid = h.get("rent_paid_at", "—")
+    missed = h.get("rent_missed_days", 0)
+    status = "✅ Оплачено"
+    if missed and missed > 0:
+        status = f"⚠️ Просрочка {missed}/3 дней"
+        if missed >= 3:
+            status = "❌ Будет выселен"
+    await message.reply(
+        f"🏠 <b>Ваша аренда</b>\n\n"
+        f"🏠 {h['type_name']}\n"
+        f"{emoji} <b>{nb}</b>\n"
+        f"💰 ${h['rent_price']:,}/день\n"
+        f"📅 Последняя оплата: {paid}\n"
+        f"📊 Статус: {status}\n\n"
+        f"🚪 Съехать: <code>!съехать</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("съехать", prefix="!/"))
+async def cmd_move_out(message: Message):
+    h = await get_tenant_house(message.from_user.id, message.chat.id)
+    if not h:
+        await message.reply("❌ Вы не арендуете дом")
+        return
+    ok = await evict_tenant(h["id"])
+    if not ok:
+        await message.reply("❌ Не удалось выселиться")
+        return
+    await message.reply(f"🚪 Вы съехали из <b>{h['type_name']}</b>", parse_mode="HTML")
+
+
+@router.message(Command("аренда_дома", prefix="!/"))
+async def cmd_rental_houses(message: Message):
+    args = message.text.strip().split(maxsplit=1)
+    target_nb = args[1] if len(args) > 1 else None
+    rentals = await get_for_rent_houses(message.chat.id)
+    # Also show own houses that are for rent (but not self-occupied)
+    my_ids = {h["id"] for h in await get_user_houses(message.from_user.id, message.chat.id)}
+    if target_nb:
+        rentals = [h for h in rentals if h["neighborhood"].lower() == target_nb.lower()]
+    if not rentals:
+        await message.reply("📭 Нет домов в аренду" + (f" в районе {target_nb}" if target_nb else ""))
+        return
+    lines = ["🏠 <b>Дома в аренду:</b>\n"]
+    for idx, h in enumerate(rentals, 1):
+        if h["id"] in my_ids:
+            continue
+        nb = h.get("neighborhood", "")
+        emoji = NEIGHBORHOOD_EMOJIS.get(nb, "🏠")
+        lines.append(
+            f"{idx}. {emoji} <b>{h['type_name']}</b>\n"
+            f"   💰 ${h['rent_price']:,}/день | 🛏 {h['bedrooms']} | 🛁 {h['bathrooms']}\n"
+        )
+    if len(lines) == 1:
+        await message.reply("📭 Нет доступных домов в аренду" + (f" в районе {target_nb}" if target_nb else ""))
+        return
+    await message.reply("\n".join(lines), parse_mode="HTML")

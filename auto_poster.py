@@ -8,6 +8,7 @@ from database import (
     create_house_listing, get_house_type, get_all_house_types, get_all_neighborhoods,
     get_neighborhood, HOUSE_TYPE_NEIGHBORHOODS, NEIGHBORHOODS,
     is_model_recently_posted, mark_model_posted, clean_old_model_posts,
+    get_all_rented_houses, collect_rent,
 )
 
 logger = logging.getLogger(__name__)
@@ -1533,6 +1534,20 @@ async def auto_poster_loop(bot):
                             errors = 0
                         else:
                             logger.warning("House post failed for chat %s", chat_id)
+            # ── Rent collection (every 4 ticks ≈ 1 min) ──
+            if counter % 4 == 0:
+                try:
+                    rented = await get_all_rented_houses()
+                    for h in rented:
+                        result = await collect_rent(h["id"])
+                        if result.get("action") == "collected":
+                            logger.info("Rent collected for house %s: $%s", h["id"], result["price"])
+                        elif result.get("action") == "evicted":
+                            logger.info("Tenant evicted from house %s (missed %s days)", h["id"], result.get("missed"))
+                        elif result.get("action") == "missed":
+                            logger.debug("Rent missed for house %s (missed %s days)", h["id"], result.get("missed"))
+                except Exception as e:
+                    logger.error("Rent collection error: %s", e)
         except Exception as e:
             logger.error("Auto-poster loop error: %s", e, exc_info=True)
             errors += 1
