@@ -135,6 +135,17 @@ async def init_db():
             )
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS recent_posted_models (
+                make TEXT NOT NULL,
+                model TEXT NOT NULL,
+                posted_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recent_models_make_model
+            ON recent_posted_models (make, model)
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -186,6 +197,28 @@ async def init_db():
                 created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS house_types (
+                id SERIAL PRIMARY KEY,
+                type_name TEXT NOT NULL,
+                bedrooms INTEGER NOT NULL,
+                bathrooms REAL NOT NULL,
+                sqft INTEGER NOT NULL,
+                description TEXT,
+                photo_url TEXT
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS neighborhoods (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+        """)
+        for col in (("house_type_id", "INTEGER"), ("neighborhood_id", "INTEGER"), ("guid", "TEXT")):
+            try:
+                await conn.execute(f"ALTER TABLE houses ADD COLUMN {col[0]} {col[1]}")
+            except Exception:
+                pass
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS job_roles (
                 id SERIAL PRIMARY KEY,
@@ -270,6 +303,13 @@ async def init_db():
                     guid TEXT PRIMARY KEY,
                     posted_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
+                CREATE TABLE IF NOT EXISTS recent_posted_models (
+                    make TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    posted_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_recent_models_make_model
+                    ON recent_posted_models (make, model);
                 CREATE TABLE IF NOT EXISTS config (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -313,6 +353,19 @@ async def init_db():
                     interest_rate REAL DEFAULT 0.5,
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS house_types (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type_name TEXT NOT NULL,
+                    bedrooms INTEGER NOT NULL,
+                    bathrooms REAL NOT NULL,
+                    sqft INTEGER NOT NULL,
+                    description TEXT,
+                    photo_url TEXT
+                );
+                CREATE TABLE IF NOT EXISTS neighborhoods (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS job_roles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -380,7 +433,22 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
-
+            # Migration: add house_type_id, neighborhood_id, guid to houses
+            for col in ("house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT"):
+                try:
+                    await conn.execute(f"ALTER TABLE houses ADD COLUMN {col}")
+                    await conn.commit()
+                except Exception:
+                    pass
+            # Seed house_types and neighborhoods
+            try:
+                await seed_house_types()
+            except Exception:
+                pass
+            try:
+                await seed_neighborhoods()
+            except Exception:
+                pass
         finally:
             await conn.close()
 
@@ -922,6 +990,69 @@ async def mark_listing_posted(guid: str) -> None:
         else:
             await conn.execute("INSERT OR IGNORE INTO posted_listings (guid) VALUES (?)", (guid,))
             await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def is_model_recently_posted(make: str, model: str, hours: int = 48) -> bool:
+    """Check if a make+model was posted within the last N hours."""
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM recent_posted_models WHERE make = $1 AND model = $2 "
+                "AND posted_at > to_char(NOW() - interval '1 hour' * $3, 'YYYY-MM-DD HH24:MI:SS')",
+                make, model, hours,
+            )
+            return row is not None
+        else:
+            cursor = await conn.execute(
+                "SELECT 1 FROM recent_posted_models WHERE make = ? AND model = ? "
+                "AND posted_at > datetime('now', ?)",
+                (make, model, f'-{hours} hours'),
+            )
+            return cursor.fetchone() is not None
+    finally:
+        await conn.close()
+
+
+async def mark_model_posted(make: str, model: str) -> None:
+    """Record that a make+model was posted now."""
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute(
+                "INSERT INTO recent_posted_models (make, model) VALUES ($1, $2)",
+                make, model,
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO recent_posted_models (make, model) VALUES (?, ?)",
+                (make, model),
+            )
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def clean_old_model_posts(hours: int = 72) -> int:
+    """Remove model post records older than N hours."""
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute(
+                "DELETE FROM recent_posted_models WHERE posted_at < "
+                "to_char(NOW() - interval '1 hour' * $1, 'YYYY-MM-DD HH24:MI:SS')",
+                hours,
+            )
+            return int(result.split()[-1]) if result else 0
+        else:
+            cursor = await conn.execute(
+                "DELETE FROM recent_posted_models WHERE posted_at < datetime('now', ?)",
+                (f'-{hours} hours',),
+            )
+            await conn.commit()
+            return cursor.rowcount
     finally:
         await conn.close()
 
@@ -1840,6 +1971,325 @@ async def admin_give_vehicle(vehicle_id: int, telegram_id: int) -> bool:
             await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?", (telegram_id, vehicle_id))
             await conn.commit()
             return True
+    finally:
+        await conn.close()
+
+
+# ── House types (27 wiki styles) ────────────────────────────
+
+HOUSE_TYPES = [
+    (1, "Mobile Home", 3, 2.5, 900, "Самый бюджетный вариант. 3 спальни, 2.5 ванны. Построен между 1940 и 1980."),
+    (2, "90's 2-Story House", 3, 2.5, 1600, "Двухэтажный дом среднего класса. 3 спальни, 2.5 ванны. Бильярд на втором этаже. 1987–2010."),
+    (3, "Average Suburban House", 3, 2.5, 1400, "Стандартный пригородный дом. 3 спальни, 2.5 ванны, 5 шкафов. 1956–1982."),
+    (4, "Modern Average Suburban House", 3, 2.5, 1700, "Современный пригородный дом на 3 спальни, 2.5 ванны. Гараж на 3 машины. 1988–2003."),
+    (5, "Upper-Class 90's Bungalow", 2, 1.5, 1100, "Небольшое бунгало. 2 спальни, 1.5 ванны. 1989–1998."),
+    (6, "Average 2-Story House", 4, 3.5, 2200, "Двухэтажный дом в фермерском стиле. 4 спальни, 3.5 ванны. 1975–1995."),
+    (7, "Mansion #1", 5, 3.5, 4000, "Особняк! 5 спален, 3.5 ванны. 2 гостиные, 2 столовые, огромная кухня. 1990–наши дни."),
+    (8, "Old Farmhouse", 4, 2.5, 2500, "Старый фермерский дом с камином, верандой, кабинетом и гаражом. 1890–1945."),
+    (9, "Lakeside Lodge", 4, 3.5, 3800, "Дом на озере с пирсом и балконами. Цокольный этаж с бильярдом. 2005–наши дни."),
+    (10, "Average 2-Story Suburban House", 3, 3.0, 1800, "Пригородный двухэтажный дом. 3 спальни, 3 ванны. 1965–1980."),
+    (11, "Old Suburban House", 4, 4.0, 2000, "Старый пригородный дом. 4 спальни, 4 ванны. 1920–1959."),
+    (12, "Original 2-Story Suburban House", 3, 3.0, 1800, "Редчайший дом! Оригинал из бета-версии Greenville. 1982."),
+    (13, "Average 2-Story Suburban House #3", 3, 2.5, 1700, "Пригородный двухэтажный дом с гостиной, прачечной и гаражом. 1960–1980."),
+    (14, "Mansion #2", 4, 3.5, 4200, "Второй особняк. 4 спальни, 3.5 ванны. Бильярд, фойе, гардеробная. 1990–наши дни."),
+    (15, "Large 2-Story Suburban House", 3, 3.0, 2400, "Большой двухэтажный пригородный дом. 3 спальни, 3 ванны. 1980–2010."),
+    (16, "Average Suburban House", 5, 3.0, 2300, "Просторный пригородный дом. 5 спален, 3 ванны. 1990–наши дни."),
+    (17, "Mobile Home", 1, 1.0, 500, "Маленький мобильный дом на одну спальню. Самый дешёвый вариант. 2005–наши дни."),
+    (18, "Modern Triangle House", 3, 2.0, 1600, "Современный треугольный дом. 3 спальни, 2 ванны. 2015–наши дни."),
+    (19, "Modern House", 3, 2.0, 1500, "Современный дом в минималистичном стиле."),
+    (20, "2-Story Modern House", 3, 2.5, 1900, "Двухэтажный современный дом."),
+    (21, "Mid-Century Modern House", 3, 2.0, 1500, "Дом середины века в стиле модерн. 1960–1975, реновирован в 2015."),
+    (22, "Modern House", 3, 2.0, 1500, "Современный дом."),
+    (23, "Cozy Rustic Suburban House", 3, 3.0, 2000, "Уютный деревенский пригородный дом. 3 спальни, 3 ванны. v1.62.0."),
+    (24, "Average Suburban Family House", 4, 3.0, 2200, "Средний семейный дом. 4 спальни, 3 ванны. v1.62.0."),
+    (25, "Large 2-Story House", 3, 3.0, 2500, "Большой двухэтажный дом. 3 спальни, 3 ванны. v1.62.0."),
+    (26, "2-Story Suburban House", 4, 3.0, 2300, "Двухэтажный пригородный дом. 4 спальни, 3 ванны. v1.62.0."),
+    (27, "2-Story Farm-Style House", 3, 3.0, 2400, "Двухэтажный фермерский дом с лофтом над гостиной. 2015–наши дни."),
+]
+
+HOUSE_PRICES = [65000, 145000, 120000, 165000, 110000, 200000, 350000, 195000, 480000,
+                150000, 135000, 250000, 155000, 380000, 210000, 175000, 40000, 185000,
+                170000, 195000, 160000, 165000, 190000, 180000, 230000, 200000, 220000]
+
+NEIGHBORHOODS = ["Six Housen't", "Lakeville", "Greenhills", "Horton", "Farm Area", "Greenville Lake", "Fleetwood Lane"]
+
+# Which house types are available in which neighborhoods (0-indexed neighborhood IDs)
+HOUSE_TYPE_NEIGHBORHOODS = {
+    1: [0], 2: [1], 3: [2], 4: [2], 5: [1], 6: [0, 1],
+    7: [0, 1, 2, 3, 4, 5, 6],  # Mansion #1 — все районы
+    8: [4], 9: [5], 10: [0, 1], 11: [3], 12: [6], 13: [0],
+    14: [3], 15: [1], 16: [2, 3], 17: [0], 18: [2],
+    19: [1, 2], 20: [2], 21: [1], 22: [0], 23: [2],
+    24: [0], 25: [3], 26: [2], 27: [4],
+}
+
+
+async def seed_house_types() -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            existing = await conn.fetchval("SELECT COUNT(*) FROM house_types")
+        else:
+            cursor = await conn.execute("SELECT COUNT(*) FROM house_types")
+            row = await cursor.fetchone()
+            existing = row[0] if row else 0
+        if existing:
+            return
+        for ht in HOUSE_TYPES:
+            hid, name, beds, baths, sqft, desc = ht
+            if _is_pg:
+                await conn.execute(
+                    "INSERT INTO house_types (id, type_name, bedrooms, bathrooms, sqft, description) VALUES ($1,$2,$3,$4,$5,$6)",
+                    hid, name, beds, baths, sqft, desc,
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO house_types (id, type_name, bedrooms, bathrooms, sqft, description) VALUES (?,?,?,?,?,?)",
+                    (hid, name, beds, baths, sqft, desc),
+                )
+        if not _is_pg:
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def seed_neighborhoods() -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            existing = await conn.fetchval("SELECT COUNT(*) FROM neighborhoods")
+        else:
+            cursor = await conn.execute("SELECT COUNT(*) FROM neighborhoods")
+            row = await cursor.fetchone()
+            existing = row[0] if row else 0
+        if existing:
+            return
+        for i, name in enumerate(NEIGHBORHOODS, 1):
+            if _is_pg:
+                await conn.execute(
+                    "INSERT INTO neighborhoods (id, name) VALUES ($1, $2)", i, name,
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO neighborhoods (id, name) VALUES (?, ?)", (i, name),
+                )
+        if not _is_pg:
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def get_house_type(house_type_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM house_types WHERE id = $1", house_type_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM house_types WHERE id = ?", (house_type_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_all_house_types() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM house_types ORDER BY id")
+        else:
+            cursor = await conn.execute("SELECT * FROM house_types ORDER BY id")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_neighborhood(neighborhood_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM neighborhoods WHERE id = $1", neighborhood_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM neighborhoods WHERE id = ?", (neighborhood_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_all_neighborhoods() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM neighborhoods ORDER BY id")
+        else:
+            cursor = await conn.execute("SELECT * FROM neighborhoods ORDER BY id")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_available_houses_by_neighborhood(chat_id: int, neighborhood_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM houses WHERE chat_id = $1 AND status = 'available' AND neighborhood_id = $2 ORDER BY created_at DESC",
+                chat_id, neighborhood_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE chat_id = ? AND status = 'available' AND neighborhood_id = ? ORDER BY created_at DESC",
+                (chat_id, neighborhood_id),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id: int, price: int, guid: str) -> int:
+    ht = await get_house_type(house_type_id)
+    nb = await get_neighborhood(neighborhood_id)
+    if not ht or not nb:
+        raise ValueError("Invalid house_type_id or neighborhood_id")
+    conn = await get_conn()
+    try:
+        loc = f"{nb['name']}, Greenville, WI"
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
+                chat_id, house_type_id, neighborhood_id, guid,
+                ht["type_name"], nb["name"], loc, price,
+                ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"],
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (chat_id, house_type_id, neighborhood_id, guid,
+                 ht["type_name"], nb["name"], loc, price,
+                 ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"]),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        await conn.close()
+
+
+# ── Player-to-player house marketplace ─────────────────────
+
+async def list_house_for_sale(house_id: int, telegram_id: int, price: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' FOR UPDATE",
+                house_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE houses SET status = 'player_listed', price = $1 WHERE id = $2",
+                price, house_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'",
+                (house_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE houses SET status = 'player_listed', price = ? WHERE id = ?",
+                (price, house_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def unlist_house(house_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'player_listed' FOR UPDATE",
+                house_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute("UPDATE houses SET status = 'sold' WHERE id = $1", house_id)
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND owner_telegram_id = ? AND status = 'player_listed'",
+                (house_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute("UPDATE houses SET status = 'sold' WHERE id = ?", (house_id,))
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def buy_player_house(house_id: int, buyer_id: int):
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM houses WHERE id = $1 AND status = 'player_listed' FOR UPDATE",
+                house_id,
+            )
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE houses SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
+                buyer_id, house_id,
+            )
+            return seller_id, price
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM houses WHERE id = ? AND status = 'player_listed'", (house_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE houses SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
+                (buyer_id, house_id),
+            )
+            await conn.commit()
+            return seller_id, price
+    finally:
+        await conn.close()
+
+
+async def get_player_listed_houses() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM houses WHERE status = 'player_listed' ORDER BY created_at DESC")
+        else:
+            cursor = await conn.execute("SELECT * FROM houses WHERE status = 'player_listed' ORDER BY created_at DESC")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
 

@@ -34,8 +34,13 @@ from database import (
     apply_start_balance_to_poor,
     get_chat_stats,
     get_all_users_ranked,
+    get_house_type,
+    get_neighborhood,
+    get_all_house_types,
+    get_all_neighborhoods,
+    create_house_listing,
 )
-from auto_poster import force_post_one
+from auto_poster import force_post_one, force_post_house
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
 
 router = Router()
@@ -424,30 +429,37 @@ async def cmd_auto_posts(message: Message):
     args = message.text.split(maxsplit=2)
 
     if len(args) < 2:
-        enabled = await get_config(f"poster_enabled:{chat_id}")
-        interval = await get_config(f"poster_interval:{chat_id}") or "120"
-        status = "✅ Включены" if enabled == "1" else "❌ Выключены"
-        channel_raw = await get_config(f"poster_cars_channel:{chat_id}")
-        topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
-        channel_info = f"🚗 Канал: {channel_raw}" if channel_raw else "🚗 Канал: этот чат"
-        if topic_raw:
-            channel_info += f" (топик {topic_raw})"
-        last_key = f"poster_last_post:{chat_id}"
-        last_raw = await get_config(last_key)
-        last_info = f", последний пост: {last_raw}" if last_raw else ", постов не было"
+        car_enabled = await get_config(f"poster_enabled:{chat_id}")
+        car_interval = await get_config(f"poster_interval:{chat_id}") or "120"
+        car_status = "✅" if car_enabled == "1" else "❌"
+        car_channel = await get_config(f"poster_cars_channel:{chat_id}") or "этот чат"
+        car_topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+
+        house_enabled = await get_config(f"poster_houses_enabled:{chat_id}")
+        house_interval = await get_config(f"poster_houses_interval:{chat_id}") or "180"
+        house_status = "✅" if house_enabled == "1" else "❌"
+        house_channel = await get_config(f"poster_houses_channel:{chat_id}") or "этот чат"
+        house_topic_raw = await get_config(f"poster_houses_topic:{chat_id}")
+
         await message.reply(
-            f"📢 <b>Авто-объявления</b>\n"
-            f"Статус: {status}\n"
-            f"Интервал: {interval} мин\n"
-            f"{channel_info}{last_info}\n\n"
-            f"Команды:\n"
-            f"<code>!объявления вкл</code> — включить\n"
-            f"<code>!объявления выкл</code> — выключить\n"
-            f"<code>!объявления интервал 1</code> — интервал в минутах\n"
-            f"<code>!объявления канал @channel</code> — канал для авто\n"
-            f"<code>!объявления топик</code> — сохранить текущий топик (для тем)\n"
-            f"<code>!объявления тест</code> — показать 1 объявление\n\n"
-            f"🚗 Реальные авто из Висконсина с фото (Wikipedia)",
+            f"📢 <b>Авто-объявления</b>\n\n"
+            f"━ 🚗 <b>Машины:</b>\n"
+            f"Статус: {car_status} | Интервал: {car_interval} мин | Канал: {car_channel}\n"
+            f"━ 🏠 <b>Дома:</b>\n"
+            f"Статус: {house_status} | Интервал: {house_interval} мин | Канал: {house_channel}\n\n"
+            f"🚗 <b>Команды для машин:</b>\n"
+            f"<code>!объявления машины вкл</code> — включить\n"
+            f"<code>!объявления машины интервал 1</code> — интервал\n"
+            f"<code>!объявления машины тест</code> — тест\n\n"
+            f"🏠 <b>Команды для домов:</b>\n"
+            f"<code>!объявления дома вкл</code> — включить\n"
+            f"<code>!объявления дома интервал 1</code> — интервал\n"
+            f"<code>!объявления дома тест</code> — тест\n\n"
+            f"📡 <b>Общее:</b>\n"
+            f"<code>!объявления канал @channel</code> — канал для машин\n"
+            f"<code>!объявления дома_канал @channel</code> — канал для домов\n"
+            f"<code>!объявления топик</code> — сохранить текущий топик (для тем машин)\n"
+            f"<code>!объявления дома_топик</code> — сохранить топик для домов",
             parse_mode="HTML",
         )
         return
@@ -460,7 +472,7 @@ async def cmd_auto_posts(message: Message):
             if target_raw in ("этот_чат", "this_chat", "здесь"):
                 await set_config(f"poster_cars_channel:{chat_id}", "")
                 await set_config(f"poster_cars_topic:{chat_id}", "")
-                await message.reply("📢 Объявления будут поститься в этот чат")
+                await message.reply("📢 Объявления машин будут поститься в этот чат")
                 return
             try:
                 target_id = int(target_raw)
@@ -479,7 +491,7 @@ async def cmd_auto_posts(message: Message):
             if target_id == message.chat.id:
                 await set_config(f"poster_cars_channel:{chat_id}", "")
                 await set_config(f"poster_cars_topic:{chat_id}", "")
-                await message.reply("📢 Объявления будут поститься в этот чат")
+                await message.reply("📢 Объявления машин будут поститься в этот чат")
             else:
                 await set_config(f"poster_cars_channel:{chat_id}", str(target_id))
                 await set_config(f"poster_cars_topic:{chat_id}", "")
@@ -495,43 +507,110 @@ async def cmd_auto_posts(message: Message):
                                     f"Чтобы сбросить: <code>!объявления канал этот_чат</code>",
                                     parse_mode="HTML")
             else:
-                await message.reply("📢 Сейчас объявления постятся в этот чат.\n"
+                await message.reply("📢 Сейчас объявления машин постятся в этот чат.\n"
                                     "Чтобы задать канал: <code>!объявления канал @channel</code>",
                                     parse_mode="HTML")
+    elif action == "дома_канал":
+        if len(args) >= 3:
+            target_raw = args[2].lower()
+            if target_raw in ("этот_чат", "this_chat", "здесь"):
+                await set_config(f"poster_houses_channel:{chat_id}", "")
+                await set_config(f"poster_houses_topic:{chat_id}", "")
+                await message.reply("📢 Объявления домов будут поститься в этот чат")
+                return
+            try:
+                target_id = int(target_raw)
+            except ValueError:
+                try:
+                    chat = await message.bot.get_chat(target_raw)
+                    target_id = chat.id
+                except Exception:
+                    await message.reply("❌ Не могу найти чат", parse_mode="HTML")
+                    return
+            await set_config(f"poster_houses_channel:{chat_id}", str(target_id))
+            await set_config(f"poster_houses_topic:{chat_id}", "")
+            await message.reply(f"📢 Объявления домов будут поститься в чат {target_id}")
+        else:
+            current = await get_config(f"poster_houses_channel:{chat_id}")
+            current_topic = await get_config(f"poster_houses_topic:{chat_id}")
+            info = f"Чат: <code>{current}</code>" if current else "этот чат"
+            if current_topic:
+                info += f", Топик: <code>{current_topic}</code>"
+            await message.reply(f"📢 Текущий канал домов: {info}", parse_mode="HTML")
     elif action == "топик":
         mid = message.message_thread_id
         if not mid:
-            await message.reply("❌ Эта команда работает только внутри топика (темы).\n"
-                                "Зайди в нужный топик и отправь команду там.")
+            await message.reply("❌ Эта команда работает только внутри топика (темы).")
             return
         await set_config(f"poster_cars_topic:{chat_id}", str(mid))
-        await message.reply(f"✅ Сохранён топик ID {mid}. Объявления будут поститься сюда.")
-    elif action == "вкл":
-        await set_config(f"poster_enabled:{chat_id}", "1")
-        chats = await get_config("poster_chats") or ""
-        if str(chat_id) not in chats.split(","):
-            new_chats = ",".join(filter(None, [*chats.split(","), str(chat_id)]))
-            await set_config("poster_chats", new_chats)
-        await message.reply("✅ Авто-объявления включены")
-    elif action == "выкл":
-        await set_config(f"poster_enabled:{chat_id}", "0")
-        await message.reply("❌ Авто-объявления выключены")
-    elif action == "интервал" and len(args) >= 3:
-        try:
-            minutes = int(args[2])
-            if minutes < 1:
-                minutes = 1
-            await set_config(f"poster_interval:{chat_id}", str(minutes))
-            await message.reply(f"✅ Интервал: {minutes} минут")
-        except ValueError:
-            await message.reply("❌ Укажите число минут")
-    elif action == "тест":
-        topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
-        topic = int(topic_raw) if topic_raw else None
-        result = await force_post_one(message.bot, chat_id, topic)
-        await message.reply(result, parse_mode="HTML")
+        await message.reply(f"✅ Сохранён топик ID {mid} для машин.")
+    elif action == "дома_топик":
+        mid = message.message_thread_id
+        if not mid:
+            await message.reply("❌ Эта команда работает только внутри топика (темы).")
+            return
+        await set_config(f"poster_houses_topic:{chat_id}", str(mid))
+        await message.reply(f"✅ Сохранён топик ID {mid} для домов.")
+    elif action == "машины" and len(args) >= 3:
+        sub = args[2]
+        if sub == "вкл":
+            await set_config(f"poster_enabled:{chat_id}", "1")
+            chats = await get_config("poster_chats") or ""
+            if str(chat_id) not in chats.split(","):
+                new_chats = ",".join(filter(None, [*chats.split(","), str(chat_id)]))
+                await set_config("poster_chats", new_chats)
+            await message.reply("✅ Авто-объявления машин включены")
+        elif sub == "выкл":
+            await set_config(f"poster_enabled:{chat_id}", "0")
+            await message.reply("❌ Авто-объявления машин выключены")
+        elif sub == "тест":
+            topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+            topic = int(topic_raw) if topic_raw else None
+            result = await force_post_one(message.bot, chat_id, topic)
+            await message.reply(result, parse_mode="HTML")
+        elif sub == "интервал" and len(args) >= 4:
+            try:
+                minutes = int(args[3])
+                await set_config(f"poster_interval:{chat_id}", str(max(1, minutes)))
+                await message.reply(f"✅ Интервал машин: {minutes} минут")
+            except ValueError:
+                await message.reply("❌ Укажите число минут")
+        else:
+            await message.reply("❌ Использование: <code>!объявления машины [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
+    elif action == "дома" and len(args) >= 3:
+        sub = args[2]
+        if sub == "вкл":
+            await set_config(f"poster_houses_enabled:{chat_id}", "1")
+            chats = await get_config("poster_chats") or ""
+            if str(chat_id) not in chats.split(","):
+                new_chats = ",".join(filter(None, [*chats.split(","), str(chat_id)]))
+                await set_config("poster_chats", new_chats)
+            await message.reply("✅ Авто-объявления домов включены")
+        elif sub == "выкл":
+            await set_config(f"poster_houses_enabled:{chat_id}", "0")
+            await message.reply("❌ Авто-объявления домов выключены")
+        elif sub == "тест":
+            topic_raw = await get_config(f"poster_houses_topic:{chat_id}")
+            topic = int(topic_raw) if topic_raw else None
+            result = await force_post_house(message.bot, chat_id, topic)
+            await message.reply(result, parse_mode="HTML")
+        elif sub == "интервал" and len(args) >= 4:
+            try:
+                minutes = int(args[3])
+                await set_config(f"poster_houses_interval:{chat_id}", str(max(1, minutes)))
+                await message.reply(f"✅ Интервал домов: {minutes} минут")
+            except ValueError:
+                await message.reply("❌ Укажите число минут")
+        else:
+            await message.reply("❌ Использование: <code>!объявления дома [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
     else:
-        await message.reply("❌ Неизвестная команда. Используй: вкл, выкл, интервал, тест")
+        await message.reply(
+            "❌ Неизвестная команда. Используй:\n"
+            "<code>!объявления</code> — статус\n"
+            "<code>!объявления машины вкл/выкл/тест/интервал N</code>\n"
+            "<code>!объявления дома вкл/выкл/тест/интервал N</code>",
+            parse_mode="HTML",
+        )
 
 
 @router.message(Command("добавить_дом", prefix="!/"))
@@ -540,30 +619,38 @@ async def cmd_add_house(message: Message):
         return
     parts = message.text.split(maxsplit=8)
     if len(parts) < 8:
+        # Show house types list
+        hts = await get_all_house_types()
+        nbs = await get_all_neighborhoods()
+        ht_lines = [f"#{ht['id']} — {ht['type_name']} ({ht['bedrooms']}br, {ht['sqft']}sqft)" for ht in hts]
+        nb_lines = [f"#{nb['id']} — {nb['name']}" for nb in nbs]
         await message.reply(
-            "❌ Использование: <code>!добавить_дом тип_жилья район локация цена комнаты ванны площадь [описание]</code>\n"
-            "Пример: <code>!добавить_дом \"Mobile Home\" \"Six Housen't\" \"Greenville,WI\" 65000 3 2.5 900 \"Описание\"</code>",
+            "❌ Использование: <code>!добавить_дом ID_ТИПА ID_РАЙОНА цена</code>\n\n"
+            "📋 <b>Типы домов:</b>\n" + "\n".join(ht_lines[:15]) +
+            "\n\n🗺 <b>Районы:</b>\n" + "\n".join(nb_lines),
             parse_mode="HTML",
         )
         return
-    type_name = parts[1]
-    neighborhood = parts[2]
-    location = parts[3]
     try:
-        price = int(parts[4])
-        bedrooms = int(parts[5])
-        bathrooms = int(parts[6])
-        sqft = int(parts[7])
+        ht_id = int(parts[1])
+        nb_id = int(parts[2])
+        price = int(parts[3])
     except ValueError:
-        await message.reply("❌ Цена, комнаты, ванны, площадь — должны быть числами")
+        await message.reply("❌ ID типа, ID района и цена должны быть числами")
         return
-    description = parts[8] if len(parts) > 8 else None
-    hid = await create_house(message.chat.id, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description or "")
+    ht = await get_house_type(ht_id)
+    nb = await get_neighborhood(nb_id)
+    if not ht or not nb:
+        await message.reply("❌ Тип дома или район не найдены. <code>!добавить_дом</code> без параметров — список.", parse_mode="HTML")
+        return
+    import random
+    guid = f"admin_{ht_id}_{nb_id}_{random.randint(100000,999999)}"
+    hid = await create_house_listing(message.chat.id, ht_id, nb_id, price, guid)
     await message.reply(
         f"✅ Дом добавлен!\n"
-        f"🏠 #{hid} {type_name}\n"
-        f"📍 <b>{neighborhood}</b> — {location}\n"
-        f"💰 ${price:,} | 🛏 {bedrooms} | 🛁 {bathrooms} | 📐 {sqft} кв.футов",
+        f"🏠 #{hid} {ht['type_name']}\n"
+        f"📍 <b>{nb['name']}</b>\n"
+        f"💰 ${price:,} | 🛏 {ht['bedrooms']} | 🛁 {ht['bathrooms']} | 📐 {ht['sqft']} кв.футов",
         parse_mode="HTML",
     )
 

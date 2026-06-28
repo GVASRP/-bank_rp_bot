@@ -2,360 +2,1103 @@ import asyncio
 import logging
 import random
 import time
-from io import BytesIO
 
-import aiohttp
-from PIL import Image, ImageDraw, ImageFont
-
-from database import is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle
+from database import (
+    is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle,
+    create_house_listing, get_house_type, get_all_house_types, get_all_neighborhoods,
+    get_neighborhood, HOUSE_TYPE_NEIGHBORHOODS, NEIGHBORHOODS,
+    is_model_recently_posted, mark_model_posted, clean_old_model_posts,
+)
 
 logger = logging.getLogger(__name__)
 
-WIKI_SEARCH = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=3"
-WIKI_IMAGE = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles=%s&format=json&pithumbsize=600"
-
-REAL_BRAND_VALUE = {
-    "Pagani": 20, "Lamborghini": 14, "Ferrari": 14,
-    "McLaren": 12, "Bentley": 10, "Rolls-Royce": 10,
-    "Maserati": 7, "Aston Martin": 7, "Marlin Motors": 7,
-    "Porsche": 5.5, "Ferdinand": 5.5,
-    "Mercedes-Benz": 4, "Stuttgart": 4,
-    "BMW": 3.5, "BKM": 3.5, "Jaguar": 3.5,
-    "Land Rover": 3.5, "Mauntley": 10, "Lotus": 3.5,
-    "Audi": 3, "Lexus": 3, "Century": 3,
-    "Cadillac": 3, "Leland": 3, "Genesis": 2.5, "Origin": 2.5,
-    "Lincoln": 2.5, "Sentinel": 2.5, "Volvo": 2, "Viking": 2,
-    "MINI": 1.8, "BITSY": 1.8, "MINI Cooper": 1.8,
-    "Saleen": 3.5, "Caline": 3.5,
-    "Shelby": 3, "Bellco": 3, "Alfa Romeo": 2.5, "Romalpha": 2.5,
-    "Renault": 1.5, "Fiat": 1.2, "Abarth": 1.5,
-    "Lancia": 1.5,
-}
-
-BRAND_TO_REAL = {
-    "Arrow": "Pontiac", "Avanta": "Fictional", "Bandit": "Ford",
-    "Barchetta": "Maserati", "BKM": "BMW", "Brawnson": "GMC",
-    "BullHorn": "Dodge", "Caline": "Saleen", "Celestial": "Tesla",
-    "Chevlon": "Chevrolet", "Chryslus": "Chrysler", "Colt": "Fictional",
-    "Combi": "Kia", "DejaVu": "Fisker", "Durant": "Chevrolet",
-    "Elgrand": "Infiniti", "Falcon": "Ford", "Ferdinand": "Porsche",
-    "Globe": "Geo", "Horlock": "BlueBird", "Jupiter": "Saturn",
-    "Leland": "Cadillac", "Mauntley": "Bentley", "Mayflower": "Plymouth",
-    "Mazuku": "Mazda", "Mizushima": "Mitsubishi", "Navara": "Nissan",
-    "Newcar": "Oldsmobile", "Normouth": "Rivian", "Oakura": "Fictional",
-    "Origin": "Genesis", "Overland": "Jeep", "Revver": "Hummer",
-    "Sentinel": "Lincoln", "Shizuoka": "Honda", "Silhouette": "Lamborghini",
-    "Simple": "Lucid", "SirRodgers": "Rolls-Royce", "Sir Rodgers": "Rolls-Royce",
-    "Stuttgart": "Mercedes-Benz", "Sumo": "Subaru", "Surrey": "McLaren",
-    "Tuscani": "Hyundai", "Valley": "Holden", "Viking": "Volvo",
-    "Vision": "Toyota", "Volzhsky": "Lada", "VSV": "HSV",
-    "Western": "Fictional", "Wolfsburg": "Volkswagen",
-    "Caseus": "Fictional", "Cobalt": "Carbon Motors", "Maverick": "Mercury",
-    "Explorer": "International", "Marlin Motors": "Aston Martin", "BITSY": "MINI",
-    "Beam": "NIO", "Bellco": "Shelby", "Eezee": "EZ-GO",
-    "GIGA": "Lynk&Co", "Romalpha": "Alfa Romeo", "Acadia": "Mitsubishi",
-    "Aikawa": "Isuzu", "Idea": "Smart", "Takeo": "Acura",
-    "Century": "Lexus", "Bovine": "Dodge",
-}
-
-COLORS = [
-    "Белый", "Чёрный", "Серебристый", "Серый", "Синий", "Красный",
-    "Тёмно-синий", "Зелёный", "Бежевый", "Коричневый", "Бордовый",
-    "Золотистый", "Оранжевый", "Жёлтый", "Фиолетовый", "Хаки",
-]
-
 GREENVILLE_CARS_BUDGET = [
-    ("Mayflower", "Rage"), ("Leland", "Series 67 Skyview"), ("Chevlon", "Amigo"),
-    ("Brawnson", "Noble Sport"), ("BullHorn", "Prancer"), ("Durant", "L/M 1500"),
-    ("Falcon", "Pony"), ("Navara", "Star"), ("BKM", "W10"),
-    ("Ferdinand", "Rapido"), ("BullHorn", "Canaveral"), ("Chevlon", "Monaco"),
-    ("Arrow", "Phoenix"), ("Avanta", "Zeta"), ("Silhouette", "Attraente"),
-    ("Ferdinand", "Tourer"), ("Mazuku", "Laguna"), ("Overland", "Iroquois"),
-    ("Oakura", "300RS"), ("Overland", "Navajo"), ("Western", "Mamba"),
-    ("Viking", "Torslanda"), ("Globe", "City AeroPod"), ("Newcar", "Falcata"),
-    ("BullHorn", "Vivid"), ("Falcon", "Advance"), ("Falcon", "Traveller"),
-    ("BullHorn", "Convoy"), ("Falcon", "Stallion"), ("BullHorn", "Dash"),
-    ("Falcon", "Aquarius"), ("Jupiter", "Electron"), ("Chevlon", "Inferno"),
-    ("Combi", "Satisfaction"), ("Falcon", "Distinct"), ("Chevlon", "Corbeta"),
-    ("Chryslus", "Puma"), ("Falcon", "Wanderer"), ("Arrow", "Trybe"),
-    ("BKM", "Regen"), ("Chevlon", "Platoro"), ("Chryslus", "FT Stroller"),
-    ("Falcon", "Breeze"), ("Falcon", "Departure"), ("Horlock", "Patriot"),
-    ("Aikawa", "Maxim"), ("Overland", "Apache"), ("Falcon", "Heritage"),
-    ("Mizushima", "Yari"), ("Chevlon", "Zafiro"), ("Chryslus", "Comercio"),
-    ("Shizuoka", "Chief"), ("Sumo", "Ota"), ("BullHorn", "Value"),
-    ("Caline", "C281"), ("Falcon", "Prime"), ("Arrow", "Boomerang"),
-    ("BKM", "Hofmeister"), ("Chryslus", "Aurora"), ("Chryslus", "Champion"),
-    ("Elgrand", "Horizon"), ("Falcon", "Angle"), ("Mazuku", "Hofu"),
-    ("Viking", "Gothenburg"), ("Wolfsburg", "Glide"), ("Revver", "Sport"),
-    ("BKM", "Regen Coupe"), ("BKM", "Series10"), ("DejaVu", "Tradition"),
-    ("Navara", "Imperium Coupe"), ("Chevlon", "Platoro"),
-    ("Falcon", "Distinct"), ("Falcon", "Scavenger"), ("BKM", "Risen"),
-    ("Brawnson", "Noble Sedan"), ("BKM", "Ziggy"),
-    ("Chryslus", "Lotela"), ("Ferdinand", "Rapido"),
-    ("BullHorn", "Buffalo"), ("BKM", "Munich"), ("BKM", "Rosenheim"),
-    ("Durant", "Manta"), ("Brawnson", "Eminence"), ("Combi", "Karive"),
-    ("Ferdinand", "Cajun"), ("Sumo", "Climax"),
-    ("Brawnson", "Arlington"), ("Century", "Active"),
-    ("Colt", "Okami"), ("Combi", "Karman"), ("Colt", "Riolu"),
-    ("Acadia", "Yari"), ("Mazuku", "Sendai"),
+    ('Auburn', 'Skipper'),
+    ('Auburn', 'L3'),
+    ('BITSY', 'Classic'),
+    ('Auburn', 'Greenwich'),
+    ('Durant', 'L/M 1500'),
+    ('Durant', 'L/M 2500'),
+    ('Mayflower', 'Orbiter'),
+    ('Stuttgart', 'Uhlenhaut'),
+    ('Arrow', 'Phoenix'),
+    ('Avanta', 'Zeta Spacewagon'),
+    ('Bayro', 'Series30 Sedan'),
+    ('Bayro', 'Series30 Wagon'),
+    ('Bayro', 'Series30 Coupe'),
+    ('Mazuku', 'Laguna'),
+    ('WeGo', 'Coral'),
+    ('Brawnson', 'B1500'),
+    ('Overland', 'Navajo'),
+    ('Western', 'Mamba'),
+    ('Western', 'Mamba Plus'),
+    ('Renault', 'Twingo'),
+    ('Volzhsky', 'Rocket'),
+    ('Falcon', 'Scavenger'),
+    ('Globe', 'City'),
+    ('Newcar', 'Falcata'),
+    ('Sunray', 'Thrust Electric Vehicle'),
+    ('Viking', 'Torslanda Sedan'),
+    ('Viking', 'Torslanda Wagon'),
+    ('Western', 'Cervid'),
+    ('Western', 'Python'),
+    ('Wolfsburg', 'Charge'),
+    ('Falcon', 'Advance'),
+    ('Falcon', 'Traveller'),
+    ('Mizushima', 'Syzygy'),
+    ('Navara', 'Summit'),
+    ('Sentinel', 'Parliament'),
+    ('Mayflower', 'Villager'),
+    ('Falcon', 'Stallion'),
+    ('Caseus', 'Imperator'),
+    ('Falcon', 'Aquarius'),
+    ('Shizuoka', 'Slick Coupe'),
+    ('Shizuoka', 'Slick Hatchback'),
+    ('Shizuoka', 'Slick Sedan'),
+    ('Wolfsburg', 'Pitch'),
+    ('Combi', 'Satisfaction'),
+    ('Falcon', 'Distinct'),
+    ('Sentinel', 'Eurus'),
+    ('Falcon', 'Wanderer'),
+    ('Western', 'Wendigo'),
+    ('Falcon', 'Breeze'),
+    ('Falcon', 'Departure'),
+    ('Maverick', 'Hiker'),
+    ('Shizuoka', 'Vision'),
+    ('Wolfsburg', 'New Classic'),
+    ('Aikawa', 'Neptune'),
+    ('Elgrand', 'Horizon'),
+    ('Falcon', 'Scavenger Pro-Trip'),
+    ('Overland', 'Apache'),
+    ('Falcon', 'Advance Pro'),
+    ('Leland', 'DeRoute'),
+    ('Shizuoka', 'Compound'),
+    ('Sumo', 'Woodlands'),
+    ('Maverick', 'Valiant'),
+    ('Overland', 'Buckaroo'),
+    ('Shizuoka', 'Chief'),
+    ('Sumo', 'Ota Sedan'),
+    ('Sumo', 'Ota Wagon'),
+    ('Sumo', 'Rockies'),
+    ('Falcon', 'Prime'),
+    ('Maverick', 'Aristocrat'),
+    ('Mazuku', 'Yushu Performance'),
+    ('Idea', 'Twofer'),
+    ('Mazuku', 'Sankakkei'),
+    ('Navara', 'Adventure'),
+    ('Navara', 'Imperium'),
+    ('Rokuta', 'Amethyst'),
+    ('Takeo', 'Turismo'),
+    ('Wolfsburg', 'Glide'),
+    ('Wolfsburg', 'Sprint'),
+    ('Falcon', 'Angle'),
+    ('Mazuku', 'Hofu'),
+    ('Mizushima', 'Honor'),
+    ('Viking', 'Gothenburg'),
+    ('Viking', 'Kompakt'),
+    ('Wolfsburg', 'Crouton'),
+    ('Wolfsburg', 'Glide Combi'),
+    ('Bayro', 'Series50'),
+    ('Bayro', 'Series50 Wagon'),
+    ('Eezee', 'GML'),
+    ('Eezee', 'GML E'),
+    ('Maverick', 'Sailor'),
+    ('Stuttgart', 'E-Saloon'),
+    ('Bayro', 'Series10'),
+    ('Bayro', 'e10'),
+    ('Durant', 'Venice'),
+    ('Falcon', 'Fission'),
+    ('Navara', 'Imperium Coupe'),
+    ('Viking', 'Obundet'),
+    ('Vision', 'Prima'),
+    ('Wolfsburg', 'Handel'),
+    ('Falcon', 'Distinct Hatchback'),
+    ('Falcon', 'Distinct Sedan'),
+    ('Wolfsburg', 'Tornado'),
+    ('Lawn-King', 'G50X'),
+    ('Navara', 'Prism'),
+    ('TONY', 'Cinco'),
+    ('Navara', 'Eco'),
+    ('Wolfsburg', 'Raven'),
 ]
 
 GREENVILLE_CARS_MID = [
-    ("Arrow", "Boomerang"), ("Falcon", "Stallion"), ("BullHorn", "Canaveral Champion"),
-    ("BullHorn", "Conqueror"), ("Durant", "L/M 2500"), ("BKM", "Rheine"),
-    ("Avanta", "Zeta Coupe"), ("Chryslus", "Empire"), ("Mazuku", "Sankakkei"),
-    ("BullHorn", "Ninja"), ("Jupiter", "B.C."), ("Mizushima", "Syzygy"),
-    ("Sentinel", "Parliament"), ("Chevlon", "Camion"), ("Sentinel", "Eurus"),
-    ("BKM", "Gottfrieding"), ("Brawnson", "Boxy"), ("Ferdinand", "Roadster"),
-    ("Maverick", "Criminal"), ("BKM", "Dingolfing"), ("Leland", "DeRoute"),
-    ("Maverick", "Valiant"), ("Ferdinand", "Ultima"),
-    ("Explorer", "Dependable 4300"), ("Marlin Motors", "Velindre"),
-    ("Maverick", "Aristocrat"), ("Stuttgart", "GT Surrey"),
-    ("BullHorn", "Bullet"), ("Chryslus", "Suburbia"), ("Idea", "Twofer"),
-    ("Viking", "Kompakt"),
-    ("Eezee", "GML"), ("Barchetta", "GrandTourer"),
-    ("BKM", "Regen M Coupe"), ("Silhouette", "Gioiosa"), ("Cobalt", "Pursuiter"),
-    ("Falcon", "Fission"), ("Surrey", "Renaissance"), ("Vision", "Prima"),
-    ("Marlin Motors", "Swan"), ("Sentinel", "Adventurer"), ("Valley", "Admiral"),
-    ("Avanta", "Rho"), ("BullHorn", "Vengence"),
-    ("Bellco", "SixtySix"), ("BullHorn", "Location"),
-    ("Mizushima", "Yari Evolution"), ("Stuttgart", "Kecskemét"),
-    ("Stuttgart", "Vance"), ("Brawnson", "Noble Wagon"),
-    ("Surrey", "LT-500"), ("Vision", "Puremia"),
-    ("BullHorn", "SFP Python"), ("Falcon", "Advance Pro"),
-    ("Stuttgart", "Essen"), ("Stuttgart", "Executive"),
-    ("Stuttgart", "GT Surrey 722"), ("Vision", "Rainier"),
-    ("VSV", "Admiral"), ("Acadia", "TSR"), ("Falcon", "Impact"),
-    ("Marlin Motors", "Swan V8"), ("Sumo", "Woodlands"), ("BKM", "Dingolfing Coupé"),
-    ("BKM", "Rosenheim Coupé"), ("Brawnson", "Cicada"), ("Leland", "LCS"),
-    ("BKM", "Olympia"), ("BKM", "Risen"), ("Caseus", "E2"),
-    ("Durant", "Voyager"), ("Leland", "LTS6"), ("Mizushima", "Fantasy"),
-    ("Navara", "Compact"), ("Navara", "Senses"), ("Overland", "Apache"),
-    ("Surrey", "Speedlet"), ("Vision", "Prairie"),
-    ("Combi", "Portofino"), ("Marlin Motors", "Bristol"),
-    ("Marlin Motors", "London"), ("Mazuku", "Hiro"), ("Navara", "Boundary"),
-    ("Origin", "Busan"), ("Sir Rodgers", "Specter"), ("Stuttgart", "Bruecke"),
-    ("BKM", "Köln"),
-    ("BKM", "Munich M"), ("Combi", "Pandora"),
-    ("Elgrand", "Immense"), ("Falcon", "Rampage"),
-    ("Mauntley", "National GT"), ("Overland", "Apache L"),
-    ("Sentinel", "Raider"),
-    ("Beam", "SB7"),
-    ("Brawnson", "Arlington XL"), ("Chevlon", "Corbeta Manta"),
-    ("Falcon", "Cowboy"), ("Ferdinand", "Snapper"), ("Ferdinand", "Vivo"),
-    ("Leland", "Vault"), ("Normouth", "SN-1"), ("Origin", "Ulsan"),
-    ("Takeo", "Experience"), ("Viking", "Kiruna"), ("Vision", "Pioneer"),
-    ("Western", "Kobold"), ("Colt", "Vulpes"),
-    ("Silhouette", "Tifon"), ("SirRodgers", "Appiration"),
-    ("BKM", "e70"), ("BKM", "eMX"),
+    ('Arrow', 'Executive'),
+    ('Wolfsburg', 'Van'),
+    ('Wolfsburg', 'Classic'),
+    ('Durant', 'Amigo'),
+    ('Leland', 'Diamante'),
+    ('Falcon', 'Pony'),
+    ('Navara', 'Star'),
+    ('Wynne', 'Model-12'),
+    ('Brawnson', 'Noble Sport'),
+    ('Avanta', 'Zeta Coupe'),
+    ('Avanta', 'Zeta Sedan'),
+    ('Navara', 'Horizon'),
+    ('Ferdinand', 'Tourer'),
+    ('Mazuku', 'Sankakkei'),
+    ('Ferdinand', 'Roadster'),
+    ('Maverick', 'Criminal'),
+    ('Sumo', 'Boxas'),
+    ('Falcon', 'Fowarder'),
+    ('Mizushima', 'Yari'),
+    ('Sumo', 'Woodlands SPT'),
+    ('Vision', 'Dominator'),
+    ('Marlin Motors', 'Velindre'),
+    ('Arrow', 'Boomerang'),
+    ('Celestial', 'Type-1'),
+    ('Bayro', 'W50'),
+    ('Bayro', 'W50 Wagon'),
+    ('Stuttgart', 'E-Saloon 063'),
+    ('Oland', 'Exekutiv'),
+    ('Celestial', 'Type-5'),
+    ('Cobalt', 'Pursuiter'),
+    ('Ferdinand', 'Jalapeno'),
+    ('Falcon', 'Scavenger'),
+    ('Marlin Motors', 'Swan'),
+    ('Sentinel', 'Adventurer'),
+    ('Falcon', 'Advance'),
+    ('Jaguar', 'XJ-L'),
+    ('Navara', 'Beat Navmo'),
+    ('Overland', 'Buckaroo'),
+    ('Sentinel', 'Encouragement'),
+    ('Stuttgart', 'Kasten'),
+    ('Mizushima', 'Yari Evolution'),
+    ('Stuttgart', 'Kecskemét'),
+    ('Stuttgart', 'Kecskemét 45'),
+    ('Stuttgart', 'Vance'),
+    ('Stuttgart', 'Vance 63'),
+    ('Sumo', 'Climax'),
+    ('Bandit', 'Predator'),
+    ('Bandit', 'Ute'),
+    ('Sumo', 'Trailstar'),
+    ('Viking', 'Torslanda Wagon'),
+    ('Vision', 'Puremia'),
+    ('Wolfsburg', 'Pitch SportWagen'),
+    ('Falcon', 'Advance Pro'),
+    ('Falcon', 'Stallion'),
+    ('Stuttgart', 'Essen'),
+    ('Stuttgart', 'Essen Coupe'),
+    ('Stuttgart', 'Executive'),
+    ('Stuttgart', 'Jogger 2500'),
+    ('Stuttgart', 'Koblenz'),
+    ('Sumo', 'Ota'),
+    ('TONY', 'Ciento'),
+    ('Vision', 'Rainier'),
+    ('Wolfsburg', 'Karen'),
+    ('Wolfsburg', 'Tornado'),
+    ('Falcon', 'Impact'),
+    ('Renault', 'Megane R.S.'),
+    ('Wolfsburg', 'Handel'),
+    ('Wolfsburg', 'Poseidon'),
+    ('Celestial', 'Type-4'),
+    ('Falcon', 'Departure'),
+    ('Falcon', 'Fission'),
+    ('Stuttgart', 'Allgau'),
+    ('Wolfsburg', 'Pitch'),
+    ('Wolfsburg', 'Pitch Alltrack'),
+    ('Acadia', 'Syzygy'),
+    ('Bayro', 'Series30'),
+    ('Bayro', 'Series30 Wagon'),
+    ('Bayro', 'Y50'),
+    ('Bayro', 'Y60'),
+    ('Caseus', 'E2'),
+    ('Celestial', 'Type-6'),
+    ('Durant', 'Camion'),
+    ('Mazuku', 'Kazoku'),
+    ('Mizushima', 'Fantasy'),
+    ('Mizushima', 'Syzygy Cross'),
+    ('Navara', 'Compact'),
+    ('Navara', 'Senses'),
+    ('Navara', 'Swindler'),
+    ('Overland', 'Apache'),
+    ('Sentinel', 'Platinum'),
+    ('Sumo', 'Woodlands'),
+    ('Viking', 'Ghent'),
+    ('Viking', 'Torslanda Sedan'),
+    ('Vision', 'Prairie'),
+    ('Vision', 'Prairie 2500HD'),
+    ('Bayro', 'Series40'),
+    ('Elgrand', 'Aspect'),
+    ('Falcon', 'Wanderer'),
+    ('Mazuku', 'Hiro'),
+    ('Mazuku', 'Hofu'),
+    ('Mazuku', 'Yushu Sedan'),
+    ('Navara', 'Boundary'),
+    ('Navara', 'Imperium'),
+    ('Overland', 'Combatant'),
+    ('Overland', 'Navajo'),
+    ('Romalpha', 'Julie Quadluck'),
+    ('Western', 'Mamba'),
+    ('Western', 'Python'),
+    ('Wolfsburg', 'Symphony'),
+    ('Wolfsburg', 'Tijuana'),
+    ('Bayro', 'Series40 Grand Tourer'),
+    ('Colt', 'Riolu'),
+    ('DIRECT', 'D2'),
+    ('Elgrand', 'Perception'),
+    ('Elgrand', 'Smyrna'),
+    ('Falcon', 'Rampage'),
+    ('Falcon', 'Rampage Sport'),
+    ('GIGA', 'G3'),
+    ('Mazuku', 'Laguna'),
+    ('Mizushima', 'Frontier'),
+    ('Navara', 'Squadron'),
+    ('Navara', 'Summit'),
+    ('Overland', 'Apache L'),
+    ('Romalpha', 'Steve'),
+    ('Sentinel', 'Raider'),
+    ('Sumo', 'Asight'),
+    ('Sumo', 'Rockies'),
+    ('Western', 'Protogen'),
+    ('Western', 'Protogen-X'),
+    ('Wolfsburg', 'Discovery'),
+    ('Wolfsburg', 'Tesuque'),
+    ('Century', 'Active'),
+    ('Century', 'Nebula'),
+    ('Combi', 'Hornet'),
+    ('DejaVu', 'Comet'),
+    ('Bandit', 'Advance'),
+    ('Falcon', 'Cowboy'),
+    ('Falcon', 'eStallion'),
+    ('Navara', 'Territory'),
+    ('Rokuta', 'Amethyst'),
+    ('Shizuoka', 'Slick'),
+    ('Shizuoka', 'Slick Hatchback'),
+    ('Shizuoka', 'Slick Spec-X'),
+    ('Viking', 'Kiruna'),
+    ('Vision', 'Pioneer'),
+    ('Vision', 'Prima'),
+    ('Vision', 'Prima Aqua-Cell'),
+    ('Vision', 'Riptide Freedom'),
+    ('Western', 'Kobold'),
+    ('Wolfsburg', 'Pioneer'),
+    ('Wolfsburg', 'Poseidon Sportback'),
+    ('Acadia', 'TSR'),
+    ('Acadia', 'Yari'),
+    ('Bandit', 'Advance Storm'),
+    ('Celestial', 'Type-4 Overland'),
+    ('Colt', 'Vulpes'),
+    ('Combi', 'Sei'),
+    ('Mazuku', 'Sendai'),
+    ('Mazuku', 'Sendai PHEV'),
+    ('Shizuoka', 'Alliance'),
+    ('Tuscani', 'Euphoria'),
+    ('Tuscani', 'Euphoria M'),
+    ('Vision', 'Riptide'),
+    ('Century', 'Moonlight'),
+    ('Shizuoka', 'Hobby'),
+    ('Tuscani', 'Rio Grande'),
+    ('Tuscani', 'Rio Grande Electrified'),
+    ('Western', 'Leviathan'),
+    ('Combi', 'Karman'),
+    ('Western', 'Sergal'),
+    ('Western', 'Sergal Convertible'),
 ]
 
 GREENVILLE_CARS_PREMIUM = [
-    ("Wolfsburg", "Van"), ("Volzhsky", "Rocket"), ("Sunray", "Thrust EV"),
-    ("BullHorn", "Bufallo 1500"), ("BKM", "Munich"), ("Falcon", "Fowarder"),
-    ("BITSY", "Classic Trophy Truck"), ("Tuscani", "Euphoria"),
-    ("Celestial", "Type-1"), ("Navara", "Imperium"),
-    ("Wolfsburg", "Crouton"), ("Revver", "Sport Utility"),
-    ("Celestial", "Type-5"), ("BullHorn", "Determinator"),
-    ("Bandit", "Predator"), ("Stuttgart", "Essen Coupe"),
-    ("Stuttgart", "Koblenz"), ("BKM", "Olympia Coupé"),
-    ("Celestial", "Type-5"), ("Western", "Kaiju"),
-    ("Acadia", "Syzygy"), ("BKM", "Leipzig"), ("BKM", "Y60"),
-    ("Celestial", "Type-7"), ("Navara", "Swindler"),
-    ("Sentinel", "Platinum"), ("Viking", "Ghent"),
-    ("BKM", "Donner Coupé"), ("BKM", "Donner M Coupé"),
-    ("Overland", "Combatant"), ("Stuttgart", "Landschaft"),
-    ("Stuttgart", "Sondergeland"), ("Stuttgart", "Vaihingen"),
-    ("Western", "Sergal"),
-    ("BKM", "eProton"), ("BKM", "Spartanburg"),
-    ("Elgrand", "Percepttion"), ("Navara", "Squadron"),
-    ("Revver", "EV"), ("Stuttgart", "ES"),
-    ("Tuscani", "Maricopa"), ("Viking", "Blixt"),
-    ("Western", "Protogen"), ("Western", "Synth LEU"),
-    ("Leland", "LTS5 V"), ("Leland", "Vault K Edition"),
-    ("Navara", "Territory"), ("Normouth", "TN-1"),
-    ("Simple", "Atmos"), ("Vision", "Riptide"),
-    ("BKM", "Series70"),
-    ("BKM", "W70"), ("Chevlon", "Corbeta Manta E-Ray"),
-    ("Normouth", "VN-1"), ("Tuscani", "Euphoria M"),
-    ("Celestial", "Type-FS"), ("Celestial", "Type-FT"),
-    ("DIRECT", "D3"),
+    ('Mayflower', 'Rage'),
+    ('Jaguar', 'E-Type'),
+    ('Silhouette', 'Veloce'),
+    ('Falcon', 'Stallion'),
+    ('Renault', '5'),
+    ('Bayro', 'W10'),
+    ('Ferdinand', 'Rapido'),
+    ('Bayro', 'W30 Sedan'),
+    ('Bayro', 'W30 Wagon'),
+    ('Bayro', 'W30 Coupe'),
+    ('Overland', 'Iroquois'),
+    ('Ferdinand', 'Tourer'),
+    ('Land Rover', 'Defender'),
+    ('Mazuku', 'Sankakkei'),
+    ('Navara', 'Horizon GT-R Series-II'),
+    ('Renault', 'Clio II'),
+    ('Falcon', 'Heritage'),
+    ('Stuttgart', 'GT Surrey'),
+    ('Eezee', 'Ziggy'),
+    ('Navara', 'Horizon'),
+    ('Sir Rodgers', 'Zenith'),
+    ('Silhouette', 'Gioiosa'),
+    ('Silhouette', 'Gioiosa Spyder'),
+    ('DejaVu', 'Tradition'),
+    ('Surrey', 'Renaissance'),
+    ('Celestial', 'Type-1'),
+    ('Jaguar', 'XK'),
+    ('Stuttgart', 'Sport Falke'),
+    ('Jaguar', 'XF'),
+    ('Ramsey', '50'),
+    ('Surrey', 'LT-500'),
+    ('Surrey', 'S-350'),
+    ('Stuttgart', 'Koblenz 63'),
+    ('Land Rover', 'Range Rover'),
+    ('Stuttgart', 'Essen 63'),
+    ('Stuttgart', 'Essen 63 Coupe'),
+    ('Durant', 'Manta'),
+    ('Durant', 'Manta H1000'),
+    ('Land Rover', 'Range Rover Sport'),
+    ('Leland', 'LCS'),
+    ('Leland', 'LCS-V'),
+    ('Bayro', 'Y50 W'),
+    ('Bayro', 'Y60 W'),
+    ('Durant', 'Camion EXT'),
+    ('Durant', 'Camion HD'),
+    ('Durant', 'Camion DOGG'),
+    ('Durant', 'Voyager'),
+    ('Land Rover', 'Range Rover Velar'),
+    ('Viking', 'Daqing'),
+    ('Audi', 'R8 V10 Spyder'),
+    ('Bayro', 'W30'),
+    ('Marlin Motors', 'Bristol'),
+    ('Marlin Motors', 'London'),
+    ('Sentinel', 'Adventurer'),
+    ('Sentinel', 'Sailor'),
+    ('Stuttgart', 'Bruecke'),
+    ('Stuttgart', 'Executive'),
+    ('Stuttgart', 'Landschaft'),
+    ('Stuttgart', 'Sondergeland'),
+    ('Stuttgart', 'Sondergeland 63'),
+    ('Stuttgart', 'Vaihingen'),
+    ('Stuttgart', 'Vaihingen 63'),
+    ('Stuttgart', 'Vaihingen 63 Coupe'),
+    ('Stuttgart', 'Vaihingen Coupe'),
+    ('Stuttgart', 'Vierturig'),
+    ('Stuttgart', 'Wilhelm Sondergeland'),
+    ('Surrey', 'Grand Tourer'),
+    ('Viking', 'Stockholm'),
+    ('Bayro', 'W40'),
+    ('Celestial', 'Type-5'),
+    ('Celestial', 'Type-5 \'Reactive Series\''),
+    ('Celestial', 'Type-7'),
+    ('Elgrand', 'Immense'),
+    ('Ferdinand', 'Cajun'),
+    ('Ferdinand', 'Rapido Coupe'),
+    ('Ferdinand', 'Rapido GT3'),
+    ('Mauntley', 'Cardiff'),
+    ('Mauntley', 'Soarer'),
+    ('Normouth', 'VN1'),
+    ('RELOAD', 'Voltage'),
+    ('Sir Rodgers', 'Constellation'),
+    ('Stuttgart', 'ES'),
+    ('Stuttgart', 'ES 53'),
+    ('Stuttgart', 'Sindelfingen'),
+    ('Viking', 'Blixt'),
+    ('Western', 'SYNTH'),
+    ('Audi', 'RS 3'),
+    ('Audi', 'RS 5 Sportback'),
+    ('Beam', 'SB7'),
+    ('Bayro', 'e40'),
+    ('Century', 'Nebula 500'),
+    ('Colt', 'Okami'),
+    ('Bandit', 'Advance Beast'),
+    ('Audi', 'RS 6 Avant'),
+    ('Falcon', 'Traveller'),
+    ('Falcon', 'Traveller Max'),
+    ('Ferdinand', 'Snapper'),
+    ('Ferdinand', 'Snapper GT4'),
+    ('Ferdinand', 'Vivo'),
+    ('Ferdinand', 'Vivo CrossWagen'),
+    ('Ferdinand', 'Vivo GranWagen'),
+    ('Normouth', 'SN-1'),
+    ('Normouth', 'TN-1'),
+    ('Silhouette', 'Rinoceronte'),
+    ('Stuttgart', 'Munster'),
+    ('Stuttgart', 'Wilhelm Munster'),
+    ('Surrey', 'Ripon'),
+    ('Takeo', 'Experience'),
+    ('Audi', 'RS 7'),
+    ('Bayro', 'Series70'),
+    ('Bayro', 'W70'),
+    ('Bayro', 'e70'),
+    ('Chiara', '006'),
+    ('Chiara', 'Vicenzo'),
+    ('Colin', 'Commander'),
+    ('Normouth', 'VN-1'),
+    ('Silhouette', 'Tifon'),
+    ('Simple', 'Atmos'),
+    ('Sir Rodgers', 'Appiration'),
+    ('Vision', 'Dominator'),
+    ('Vision', 'Yosemite'),
+    ('Audi', 'RS Q8'),
+    ('Bayro', 'Y50'),
+    ('Bayro', 'Y60'),
+    ('Bayro', 'Y70'),
+    ('Celestial', 'Type-FS'),
+    ('Celestial', 'Type-FT'),
+    ('Century', 'Major'),
+    ('DIRECT', 'D3'),
+    ('Elektrisk', 'Pluto'),
+    ('Stuttgart', 'E-Saloon'),
+    ('Stuttgart', 'E-Saloon 053'),
 ]
 
 GREENVILLE_CARS_LEGENDARY = [
-    ("Stuttgart", "Munster"), ("Chryslus", "Jetstream"),
-    ("BITSY", "8000 Roadster"), ("BullHorn", "Prancer TR Classic"),
-    ("Leland", "Diamante"), ("Stuttgart", "Uhlenhaut"),
-    ("Silhouette", "Gioiosa Super Corsa Speciale"),
-    ("Arrow", "Phoenix Dimensional Traveler"),
-    ("Navara", "Summit"), ("Navara", "Horizon GT-R Series-II"),
-    ("BKM", "Regen M CSL"), ("Navara", "Horizon GT-R Navmo Z-Tune"),
-    ("Chevlon", "Platoro 1500 The Oppressor"),
-    ("BullHorn", "Grand Convoy"), ("Valley", "Admiral Sportback"),
-    ("Stuttgart", "Kecskemét 45"), ("VSV", "Admiral GTSR W1"),
-    ("Stuttgart", "Essen 63 Coupe"), ("Durant", "Manta H1300"),
-    ("BKM", "Zoom"), ("BullHorn", "SuperCarrier"),
-    ("Durant", "Camion HEEN"), ("Overland", "Apache SFP Heen H1000"),
-    ("Sir Rodgers", "Constellation"), ("Overland", "Combatant Ghoul 6x6"),
-    ("Stuttgart", "Vaihingen 63"),
-    ("Surrey", "Grand Tourer"), ("Wolfsburg", "Symphony"),
-    ("Elgrand", "Smyrna"), ("Ferdinand", "Rapido GT3"),
-    ("GIGA", "G3"), ("SirRodgers", "Constellation K-Edition"),
-    ("Western", "Protogen-X"), ("Celestial", "FCT"),
-    ("Chevlon", "Corbeta Manta Z06"), ("Falcon", "Advance Beast Rawr"),
-    ("Ferdinand", "Snapper GT4"), ("Silhouette", "Rinoceronte"),
-    ("Stuttgart", "Wilhelm Munster"), ("Simple", "Atmos Sapphire"),
-    ("Western", "Leviathan"),
+    ('Stuttgart', 'Munster'),
+    ('Chiara', 'Berlinetta GT'),
+    ('Silhouette', 'Attraente'),
+    ('Jaguar', 'XJ220'),
+    ('Saleen', 'S7'),
+    ('Pagani', 'Zonda'),
+    ('Ferdinand', 'Ultima'),
+    ('Zephyr', 'Vicieux'),
+    ('Pagani', 'Huayra'),
+    ('Skane', 'Rusa'),
+    ('Surrey', 'Speedlet'),
+    ('Celestial', 'Type-1'),
+    ('NVNA', 'Acesera'),
+    ('NVNAsport', 'Acesera'),
 ]
 
 LICENSED_CARS = [
-    ("Audi", "A3"), ("Audi", "A4"), ("Audi", "A5"), ("Audi", "A6"), ("Audi", "A8"), ("Audi", "Q5"),
-    ("Jaguar", "F-Type"), ("Jaguar", "F-Pace"), ("Jaguar", "XE"), ("Jaguar", "XF"), ("Jaguar", "I-Pace"),
-    ("Land Rover", "Range Rover"), ("Land Rover", "Discovery"), ("Land Rover", "Defender"),
-    ("Land Rover", "Range Rover Sport"), ("Land Rover", "Range Rover Evoque"),
-    ("Lotus", "Emira"), ("Lotus", "Evija"), ("Lotus", "Exige"),
-    ("Pagani", "Huayra"), ("Pagani", "Utopia"), ("Pagani", "Zonda"),
-    ("Fiat", "500"), ("Fiat", "Panda"),
-    ("Abarth", "500"), ("Abarth", "124 Spider"),
-    ("Alfa Romeo", "Giulia"), ("Alfa Romeo", "Stelvio"), ("Alfa Romeo", "Tonale"),
-    ("Alfa Romeo", "4C"), ("Alfa Romeo", "Giulietta"), ("Alfa Romeo", "MiTo"),
-    ("Lancia", "Stratos"), ("Lancia", "Delta"),
-    ("Saleen", "S1"), ("Saleen", "S7"),
-    ("Renault", "5"), ("Renault", "Clio"), ("Renault", "Megane"),
-    ("Renault", "Talisman"), ("Renault", "Captur"), ("Renault", "Kadjar"), ("Renault", "Espace"),
+    ('Audi', 'R8 V10 Spyder'),
+    ('Audi', 'RS 3'),
+    ('Audi', 'RS 5 Sportback'),
+    ('Audi', 'RS 6 Avant'),
+    ('Audi', 'RS 7'),
+    ('Audi', 'RS Q8'),
+    ('Jaguar', 'E-Type'),
+    ('Jaguar', 'XF'),
+    ('Jaguar', 'XJ-L'),
+    ('Jaguar', 'XJ220'),
+    ('Jaguar', 'XK'),
+    ('Land Rover', 'Defender'),
+    ('Land Rover', 'Range Rover'),
+    ('Land Rover', 'Range Rover Sport'),
+    ('Land Rover', 'Range Rover Velar'),
+    ('Pagani', 'Huayra'),
+    ('Pagani', 'Zonda'),
+    ('Renault', '5'),
+    ('Renault', 'Clio II'),
+    ('Renault', 'Megane R.S.'),
+    ('Renault', 'Twingo'),
+    ('Saleen', 'S7'),
 ]
 
-LICENSED_BRANDS = {"Audi", "Renault", "Jaguar", "Land Rover", "Lotus", "Pagani", "Fiat", "Abarth", "Alfa Romeo", "Lancia", "Saleen"}
+LICENSED_BRANDS = {'Saleen', 'Renault', 'Audi', 'Jaguar', 'Land Rover', 'Pagani'}
 
-# Wiki-verified purchasable vehicles (make → [models])
 PURCHASABLE_VEHICLES = {
-    "Arrow": ["Executive", "Phoenix", "Boomerang"],
-    "Auburn": ["Bullet", "Greenwich", "New Yorker", "Statesman", "Envoy"],
-    "Bellco": ["SixtySix"],
-    "Bovine": ["Challenger", "Hornet", "Dakota", "Durango", "Viper"],
-    "Brawnson": ["Enclave", "Acadia"],
-    "Celestial": ["Type-1", "Type-4", "Type-5", "Type-6", "Type-7", "Type-FS", "Type-FT", "FCT", "Type-4 Overland", "Celestruck"],
-    "Cobalt": ["P1", "P7", "E3"],
-    "Cratus": ["Pacifica"],
-    "DejaVu": ["Karma", "Ocean", "Pearl"],
-    "Durant": ["Amigo", "Camion", "Camion EXT", "Camion HD", "Camion PPV", "L/M 1500", "L/M 2500", "Manta", "Venice", "Voyager"],
-    "Eezee": ["EZ1", "EZ2", "Tera"],
-    "Elektrisk": ["Pluto"],
-    "Explorer": ["Harvester"],
-    "Falcon": ["Stallion", "Pony", "Scavenger", "Advance", "Traveller", "Aquarius", "Distinct",
-               "Distinct Sedan", "Distinct Hatchback", "Wanderer", "Breeze", "Departure",
-               "Advance Pro", "Heritage", "Fowarder", "Fowarder Limo", "Angle", "Fission",
-               "Impact", "Prime", "Cowboy", "eStallion", "Traveller Max", "Global Ambulance",
-               "Scavenger Pro-Trip", "Scavenger Metro", "Scavenger Sheriff", "Scavenger WSP",
-               "Scavenger Fire Rescue", "Aquarius Interceptor Sedan Metro",
-               "Aquarius Interceptor Sedan Sheriff", "Aquarius Interceptor Sedan WSP",
-               "Aquarius Security", "Advance DOT", "Advance Fire Rescue",
-               "Advance Pro Ambulance", "Advance Pro Fire Rescue", "Advance Pro SWAT",
-               "Advance SSV Security", "Advance SSV Sheriff", "Advance SSV WSP",
-               "Prime Fire Rescue", "Prime Police Interceptor Metro",
-               "Prime Police Interceptor Security", "Prime Police Interceptor Sheriff",
-               "Prime Police Interceptor WSP", "Fission Interceptor Sheriff",
-               "Fission Interceptor WSP", "Fission Interceptor Security",
-               "Fission Interceptor Fire Police", "Departure Security"],
-    "Globe": ["Metro"],
-    "DOGG": ["Poison TT", "Venom", "Venom GT", "Exorcist"],
-    "Lawn-King": ["Classic"],
-    "Leland": ["Melody", "Cypress", "Celeste", "Harmony", "Encore", "Aria", "Sonata"],
-    "Maverick": ["Marauder", "Montego", "Sable", "Milan", "Cyclone"],
-    "Newcar": ["Ivy"],
-    "Normouth": ["R1", "R1S", "R1T"],
-    "NVNA": ["Acesera", "Sprint", "Rally", "Touring", "Sport"],
-    "Saleen": ["S1", "S7"],
-    "Sentinel": ["Continental", "Town Car", "Navigator", "Aviator", "MKZ", "MKS", "MKT", "Zephyr", "LS", "Mark LT", "Blackwood"],
-    "Simple": ["Air"],
-    "Sunray": ["Sunlight"],
-    "Wynne": ["DeLorean"],
-    "Acadia": ["Syzygy", "TSR", "Yari"],
-    "Aikawa": ["Elf"],
-    "Caseus": ["R1", "R2", "R3", "R4"],
-    "Century": ["ES", "IS", "LS", "RX", "NX", "GX"],
-    "Colt": ["Riolu", "Vulpes", "Okami"],
-    "Mazuku": ["Laguna", "Sankakkei", "Yushu Performance", "Hofu", "Kazoku", "Hiro",
-               "Yushu Sedan", "Sendai", "Sendai PHEV"],
-    "Mizushima": ["Outlander", "Eclipse Cross", "Lancer", "Evolution", "Pajero", "Montero", "i-MiEV"],
-    "Rokuta": ["Amethyst"],
-    "Shizuoka": ["Alliance", "Chief", "Compound", "Finis", "Hobby", "Slick", "Slick Coupe",
-                 "Slick Hatchback", "Slick Sedan", "Slick Spec-X", "Vision"],
-    "Sumo": ["Boxas", "Woodlands", "Woodlands SPT", "Ota Sedan", "Ota Wagon", "Rockies",
-             "Climax", "Trailstar", "Ota", "Asight"],
-    "Takeo": ["Experience", "MDX", "TLX", "Integra"],
-    "Vision": ["Dominator", "Pioneer", "Prairie", "Prairie 2500HD", "Prima", "Prima V8",
-               "Puremia", "Rainier", "Riptide", "Riptide Freedom", "Robust", "Yosemite"],
-    "Audi": ["A3", "A4", "A5", "A6", "A8", "Q5"],
-    "Bayro": ["Series10", "Series20", "Series30", "Series70", "Regen", "Regen Coupe", "Regen M",
-              "Regen M CSL", "Regen Touring", "Hofmeister", "Hofmeister M",
-              "eProton", "Olympia", "Olympia M", "Olympia Coupé", "Olympia Convertible",
-              "Donner Coupé", "Donner M Coupé", "Donner Convertible", "Donner M Convertible",
-              "Gottfrieding", "Dingolfing IC", "Dingolfing M", "Dingolfing Coupé",
-              "Munich", "Munich M", "e10", "W10", "W20", "W30", "W40", "e40", "e70", "W70",
-              "eMX", "eRosenheim", "Rosenheim", "Risen", "Risen Coupé", "Risen Roadster",
-              "Leipzig", "Rheine", "Köln"],
-    "Idea": ["Twofer"],
-    "Stuttgart": ["Munster", "Uhlenhaut", "GT Surrey", "E-Saloon", "E-Saloon 063",
-                  "Kasten", "Sport Falke", "Vance", "Vance 63", "Kecskemét", "Kecskemét 45",
-                  "Executive", "Koblenz", "Koblenz 63", "Essen", "Essen Coupe", "Essen 63",
-                  "Essen 63 Coupe", "Jogger Limo", "Jogger 2500", "Allgau", "Vierturig",
-                  "Vaihingen", "Vaihingen Coupe", "Vaihingen 63", "Vaihingen 63 Coupe",
-                  "Bruecke", "Sondergeland", "Sondergeland 63", "Wilhelm Sondergeland",
-                  "Landschaft", "ES", "ES 53", "Sindelfingen"],
-    "Wolfsburg": ["Bunny", "Charge", "Classic", "Crouton", "Discovery", "Glide", "Handel",
-                  "Karen", "New Classic", "Pioneer", "Pitch", "Pitch W12", "Poseidon",
-                  "Poseidon Sportback", "Raven", "Sprint", "Symphony", "Tesuque", "Tijuana",
-                  "Tornado", "Van"],
-    "Abarth": ["500", "124 Spider"],
-    "Alfa Romeo": ["Giulia", "Stelvio", "Tonale", "4C", "Giulietta", "MiTo"],
-    "Chiara": ["Berlinetta GT", "F40", "S.F90"],
-    "Fiat": ["500", "Panda"],
-    "Lancia": ["Delta", "Stratos"],
-    "Pagani": ["Huayra", "Zonda", "Utopia"],
-    "Silhouette": ["Aventador", "Huracán", "Urus", "Murciélago", "Countach", "Miura", "Diablo", "Gallardo"],
-    "BITSY": ["Convertible"],
-    "Jaguar": ["F-Type", "F-Pace", "XE", "XF", "I-Pace"],
-    "Land Rover": ["Range Rover", "Range Rover Sport", "Range Rover Evoque", "Discovery", "Defender"],
-    "Lotus": ["Emira", "Evija", "Exige"],
-    "Marlin": ["DB11", "DBS", "Vantage", "DBX", "Valhalla", "Valkyrie", "Vanquish",
-               "Rapide", "DB9", "One-77", "V12 Vantage", "DBS Superleggera", "DB12"],
-    "Mauntley": ["Flying Spur", "Continental"],
-    "Ramsey": ["P50"],
-    "Sir Rodgers": ["Phantom", "Ghost", "Cullinan"],
-    "Surrey": ["720S", "765LT", "Artura", "Senna", "P1", "600LT", "570S"],
-    "DIRECT": ["1", "2", "3"],
-    "Skane": ["Regera"],
-    "Viking": ["S60", "V60", "XC60", "S90", "V90", "XC90", "C40", "EX30",
-               "EX90", "V40", "S40", "850", "240", "Amazon"],
-    "Western": ["Mamba", "Mamba Plus", "Python", "Cervid", "Wendigo", "Leviathan", "Protogen",
-                "Protogen-X", "Stallion", "Ute", "Falcon", "Commodore", "Statesman",
-                "Caprice", "Monaro", "Torana", "Sandman", "Kingswood"],
-    "Renault": ["5", "Clio", "Megane", "Talisman", "Captur", "Kadjar", "Espace"],
-    "Beam": ["ET7"],
-    "GIGA": ["01"],
-    "Combi": ["Satisfaction", "Spirit", "Rio", "Soul", "Optima"],
-    "Tuscani": ["Elantra", "Sonata", "Santa Fe", "Tucson", "Kona", "Veloster"],
-    "Avanta": ["E1", "E2", "E3"],
-    "Volzhsky": ["Niva"],
-    "WeGo": ["GV"],
+    'Acadia': [
+        'Syzygy',
+        'TSR',
+        'Yari',
+    ],
+    'Aikawa': ['Neptune'],
+    'Arrow': [
+        'Boomerang',
+        'Executive',
+        'Phoenix',
+    ],
+    'Auburn': [
+        'Greenwich',
+        'L3',
+        'Skipper',
+    ],
+    'Audi': [
+        'R8 V10 Spyder',
+        'RS 3',
+        'RS 5 Sportback',
+        'RS 6 Avant',
+        'RS 7',
+        'RS Q8',
+    ],
+    'Avanta': [
+        'Zeta Coupe',
+        'Zeta Sedan',
+        'Zeta Spacewagon',
+    ],
+    'BITSY': ['Classic'],
+    'Bandit': [
+        'Advance',
+        'Advance Beast',
+        'Advance Storm',
+        'Predator',
+        'Ute',
+    ],
+    'Bayro': [
+        'Series10',
+        'Series30',
+        'Series30 Coupe',
+        'Series30 Sedan',
+        'Series30 Wagon',
+        'Series40',
+        'Series40 Grand Tourer',
+        'Series50',
+        'Series50 Wagon',
+        'Series70',
+        'W10',
+        'W30',
+        'W30 Coupe',
+        'W30 Sedan',
+        'W30 Wagon',
+        'W40',
+        'W50',
+        'W50 Wagon',
+        'W70',
+        'Y50',
+        'Y50 W',
+        'Y60',
+        'Y60 W',
+        'Y70',
+        'e10',
+        'e40',
+        'e70',
+    ],
+    'Beam': ['SB7'],
+    'Brawnson': [
+        'B1500',
+        'Noble Sport',
+    ],
+    'Caseus': [
+        'E2',
+        'Imperator',
+    ],
+    'Celestial': [
+        'Type-1',
+        'Type-4',
+        'Type-4 Overland',
+        'Type-5',
+        "Type-5 'Reactive Series'",
+        'Type-6',
+        'Type-7',
+        'Type-FS',
+        'Type-FT',
+    ],
+    'Century': [
+        'Active',
+        'Major',
+        'Moonlight',
+        'Nebula',
+        'Nebula 500',
+    ],
+    'Chiara': [
+        '006',
+        'Berlinetta GT',
+        'Vicenzo',
+    ],
+    'Cobalt': ['Pursuiter'],
+    'Colin': ['Commander'],
+    'Colt': [
+        'Okami',
+        'Riolu',
+        'Vulpes',
+    ],
+    'Combi': [
+        'Hornet',
+        'Karman',
+        'Satisfaction',
+        'Sei',
+    ],
+    'DIRECT': [
+        'D2',
+        'D3',
+    ],
+    'DejaVu': [
+        'Comet',
+        'Tradition',
+    ],
+    'Durant': [
+        'Amigo',
+        'Camion',
+        'Camion DOGG',
+        'Camion EXT',
+        'Camion HD',
+        'L/M 1500',
+        'L/M 2500',
+        'Manta',
+        'Manta H1000',
+        'Venice',
+        'Voyager',
+    ],
+    'Eezee': [
+        'GML',
+        'GML E',
+        'Ziggy',
+    ],
+    'Elektrisk': ['Pluto'],
+    'Elgrand': [
+        'Aspect',
+        'Horizon',
+        'Immense',
+        'Perception',
+        'Smyrna',
+    ],
+    'Falcon': [
+        'Advance',
+        'Advance Pro',
+        'Angle',
+        'Aquarius',
+        'Breeze',
+        'Cowboy',
+        'Departure',
+        'Distinct',
+        'Distinct Hatchback',
+        'Distinct Sedan',
+        'Fission',
+        'Fowarder',
+        'Heritage',
+        'Impact',
+        'Pony',
+        'Prime',
+        'Rampage',
+        'Rampage Sport',
+        'Scavenger',
+        'Scavenger Pro-Trip',
+        'Stallion',
+        'Traveller',
+        'Traveller Max',
+        'Wanderer',
+        'eStallion',
+    ],
+    'Ferdinand': [
+        'Cajun',
+        'Jalapeno',
+        'Rapido',
+        'Rapido Coupe',
+        'Rapido GT3',
+        'Roadster',
+        'Snapper',
+        'Snapper GT4',
+        'Tourer',
+        'Ultima',
+        'Vivo',
+        'Vivo CrossWagen',
+        'Vivo GranWagen',
+    ],
+    'GIGA': ['G3'],
+    'Globe': ['City'],
+    'Idea': ['Twofer'],
+    'Jaguar': [
+        'E-Type',
+        'XF',
+        'XJ-L',
+        'XJ220',
+        'XK',
+    ],
+    'Land Rover': [
+        'Defender',
+        'Range Rover',
+        'Range Rover Sport',
+        'Range Rover Velar',
+    ],
+    'Lawn-King': ['G50X'],
+    'Leland': [
+        'DeRoute',
+        'Diamante',
+        'LCS',
+        'LCS-V',
+    ],
+    'Marlin Motors': [
+        'Bristol',
+        'London',
+        'Swan',
+        'Velindre',
+    ],
+    'Mauntley': [
+        'Cardiff',
+        'Soarer',
+    ],
+    'Maverick': [
+        'Aristocrat',
+        'Criminal',
+        'Hiker',
+        'Sailor',
+        'Valiant',
+    ],
+    'Mayflower': [
+        'Orbiter',
+        'Rage',
+        'Villager',
+    ],
+    'Mazuku': [
+        'Hiro',
+        'Hofu',
+        'Kazoku',
+        'Laguna',
+        'Sankakkei',
+        'Sendai',
+        'Sendai PHEV',
+        'Yushu Performance',
+        'Yushu Sedan',
+    ],
+    'Mizushima': [
+        'Fantasy',
+        'Frontier',
+        'Honor',
+        'Syzygy',
+        'Syzygy Cross',
+        'Yari',
+        'Yari Evolution',
+    ],
+    'NVNA': ['Acesera'],
+    'NVNAsport': ['Acesera'],
+    'Navara': [
+        'Adventure',
+        'Beat Navmo',
+        'Boundary',
+        'Compact',
+        'Eco',
+        'Horizon',
+        'Horizon GT-R Series-II',
+        'Imperium',
+        'Imperium Coupe',
+        'Prism',
+        'Senses',
+        'Squadron',
+        'Star',
+        'Summit',
+        'Swindler',
+        'Territory',
+    ],
+    'Newcar': ['Falcata'],
+    'Normouth': [
+        'SN-1',
+        'TN-1',
+        'VN-1',
+        'VN1',
+    ],
+    'Oland': ['Exekutiv'],
+    'Overland': [
+        'Apache',
+        'Apache L',
+        'Buckaroo',
+        'Combatant',
+        'Iroquois',
+        'Navajo',
+    ],
+    'Pagani': [
+        'Huayra',
+        'Zonda',
+    ],
+    'RELOAD': ['Voltage'],
+    'Ramsey': ['50'],
+    'Renault': [
+        '5',
+        'Clio II',
+        'Megane R.S.',
+        'Twingo',
+    ],
+    'Rokuta': ['Amethyst'],
+    'Romalpha': [
+        'Julie Quadluck',
+        'Steve',
+    ],
+    'Saleen': ['S7'],
+    'Sentinel': [
+        'Adventurer',
+        'Encouragement',
+        'Eurus',
+        'Parliament',
+        'Platinum',
+        'Raider',
+        'Sailor',
+    ],
+    'Shizuoka': [
+        'Alliance',
+        'Chief',
+        'Compound',
+        'Hobby',
+        'Slick',
+        'Slick Coupe',
+        'Slick Hatchback',
+        'Slick Sedan',
+        'Slick Spec-X',
+        'Vision',
+    ],
+    'Silhouette': [
+        'Attraente',
+        'Gioiosa',
+        'Gioiosa Spyder',
+        'Rinoceronte',
+        'Tifon',
+        'Veloce',
+    ],
+    'Simple': ['Atmos'],
+    'Sir Rodgers': [
+        'Appiration',
+        'Constellation',
+        'Zenith',
+    ],
+    'Skane': ['Rusa'],
+    'Stuttgart': [
+        'Allgau',
+        'Bruecke',
+        'E-Saloon',
+        'E-Saloon 053',
+        'E-Saloon 063',
+        'ES',
+        'ES 53',
+        'Essen',
+        'Essen 63',
+        'Essen 63 Coupe',
+        'Essen Coupe',
+        'Executive',
+        'GT Surrey',
+        'Jogger 2500',
+        'Kasten',
+        'Kecskemét',
+        'Kecskemét 45',
+        'Koblenz',
+        'Koblenz 63',
+        'Landschaft',
+        'Munster',
+        'Sindelfingen',
+        'Sondergeland',
+        'Sondergeland 63',
+        'Sport Falke',
+        'Uhlenhaut',
+        'Vaihingen',
+        'Vaihingen 63',
+        'Vaihingen 63 Coupe',
+        'Vaihingen Coupe',
+        'Vance',
+        'Vance 63',
+        'Vierturig',
+        'Wilhelm Munster',
+        'Wilhelm Sondergeland',
+    ],
+    'Sumo': [
+        'Asight',
+        'Boxas',
+        'Climax',
+        'Ota',
+        'Ota Sedan',
+        'Ota Wagon',
+        'Rockies',
+        'Trailstar',
+        'Woodlands',
+        'Woodlands SPT',
+    ],
+    'Sunray': ['Thrust Electric Vehicle'],
+    'Surrey': [
+        'Grand Tourer',
+        'LT-500',
+        'Renaissance',
+        'Ripon',
+        'S-350',
+        'Speedlet',
+    ],
+    'TONY': [
+        'Ciento',
+        'Cinco',
+    ],
+    'Takeo': [
+        'Experience',
+        'Turismo',
+    ],
+    'Tuscani': [
+        'Euphoria',
+        'Euphoria M',
+        'Rio Grande',
+        'Rio Grande Electrified',
+    ],
+    'Viking': [
+        'Blixt',
+        'Daqing',
+        'Ghent',
+        'Gothenburg',
+        'Kiruna',
+        'Kompakt',
+        'Obundet',
+        'Stockholm',
+        'Torslanda Sedan',
+        'Torslanda Wagon',
+    ],
+    'Vision': [
+        'Dominator',
+        'Pioneer',
+        'Prairie',
+        'Prairie 2500HD',
+        'Prima',
+        'Prima Aqua-Cell',
+        'Puremia',
+        'Rainier',
+        'Riptide',
+        'Riptide Freedom',
+        'Yosemite',
+    ],
+    'Volzhsky': ['Rocket'],
+    'WeGo': ['Coral'],
+    'Western': [
+        'Cervid',
+        'Kobold',
+        'Leviathan',
+        'Mamba',
+        'Mamba Plus',
+        'Protogen',
+        'Protogen-X',
+        'Python',
+        'SYNTH',
+        'Sergal',
+        'Sergal Convertible',
+        'Wendigo',
+    ],
+    'Wolfsburg': [
+        'Charge',
+        'Classic',
+        'Crouton',
+        'Discovery',
+        'Glide',
+        'Glide Combi',
+        'Handel',
+        'Karen',
+        'New Classic',
+        'Pioneer',
+        'Pitch',
+        'Pitch Alltrack',
+        'Pitch SportWagen',
+        'Poseidon',
+        'Poseidon Sportback',
+        'Raven',
+        'Sprint',
+        'Symphony',
+        'Tesuque',
+        'Tijuana',
+        'Tornado',
+        'Van',
+    ],
+    'Wynne': ['Model-12'],
+    'Zephyr': ['Vicieux'],
 }
 
-PURCHASABLE_SET = {(make.lower(), model.lower()) for make, models in PURCHASABLE_VEHICLES.items() for model in models}
+PURCHASABLE_SET = set()
+for make, models in PURCHASABLE_VEHICLES.items():
+    for model in models:
+        PURCHASABLE_SET.add((make, model))
 
+BRAND_TO_REAL = {
+    'Acadia': 'Mitsubishi',
+    'Aikawa': 'Isuzu',
+    'Andre': 'Fictional',
+    'Arrow': 'Pontiac',
+    'Auburn': 'Auburn',
+    'Audi': 'Audi',
+    'Autowerk': 'Audi',
+    'Avanta': 'Fictional',
+    'BITSY': 'MINI',
+    'Bandit': 'Ford',
+    'Bayro': 'Alpina',
+    'Beam': 'NIO',
+    'Bob': 'Fictional',
+    'Brawnson': 'GMC',
+    'Caseus': 'Fictional',
+    'Celestial': 'Tesla',
+    'Century': 'Lexus',
+    'Chiara': 'Ferrari',
+    'Cobalt': 'Carbon Motors',
+    'Colin': 'Fictional',
+    'Colt': 'Fictional',
+    'Combi': 'Kia',
+    'DIRECT': 'Fictional',
+    'DejaVu': 'Fisker',
+    'Durant': 'Chevrolet',
+    'Eezee': 'EZ-GO',
+    'Elektrisk': 'Fictional',
+    'Elgrand': 'Infiniti',
+    'Falcon': 'Ford',
+    'Ferdinand': 'Porsche',
+    'GIGA': 'Lynk&Co',
+    'Globe': 'Geo',
+    'Idea': 'Smart',
+    'Jaguar': 'Jaguar',
+    'Land Rover': 'Land Rover',
+    'Lawn King': 'Fictional',
+    'Lawn-King': 'Fictional',
+    'LawnKing': 'Fictional',
+    'Leland': 'Cadillac',
+    'Marlin': 'Fictional',
+    'Marlin Motors': 'Aston Martin',
+    'Mauntley': 'Bentley',
+    'Maverick': 'Mercury',
+    'Mayflower': 'Plymouth',
+    'Mazuku': 'Mazda',
+    'Mizushima': 'Mitsubishi',
+    'NVNA': 'Fictional',
+    'NVNAsport': 'Fictional',
+    'Navara': 'Nissan',
+    'Newcar': 'Oldsmobile',
+    'Normouth': 'Rivian',
+    'Oland': 'Fictional',
+    'Overland': 'Jeep',
+    'Pagani': 'Pagani',
+    'Piranha': 'Fictional',
+    'RELOAD': 'Fictional',
+    'Ramsey': 'Peel',
+    'Renault': 'Renault',
+    'Rokuta': 'Fictional',
+    'Romalpha': 'Alfa Romeo',
+    'Rovelo': 'Fictional',
+    'Saleen': 'Saleen',
+    'Sentinel': 'Lincoln',
+    'Shizuoka': 'Honda',
+    'Silhouette': 'Lamborghini',
+    'Simple': 'Lucid',
+    'Sir Rodgers': 'Rolls-Royce',
+    'SirRodgers': 'Rolls-Royce',
+    'Skane': 'Koenigsegg',
+    'Stuttgart': 'Mercedes-Benz',
+    'Sumo': 'Subaru',
+    'Sunray': 'Fictional',
+    'Surrey': 'McLaren',
+    'TONY': 'Fictional',
+    'Takeo': 'Acura',
+    'TerrainTraveller': 'Fictional',
+    'Tuscani': 'Hyundai',
+    'Viking': 'Volvo',
+    'Vision': 'Toyota',
+    'Volt': 'Fictional',
+    'Volzhsky': 'Lada',
+    'WeGo': 'Fictional',
+    'Western': 'Fictional',
+    'Wolfsburg': 'Volkswagen',
+    'Wynne': 'Fictional',
+    'Zephyr': 'Fictional',
+}
+
+REAL_BRAND_VALUE = {
+    'Audi': 3,
+    'Autowerk': 3,
+    'BITSY': 1.8,
+    'Century': 3,
+    'Chiara': 14,
+    'Colt': 2,
+    'DejaVu': 3,
+    'Ferdinand': 5.5,
+    'GIGA': 2,
+    'Jaguar': 3.5,
+    'Land Rover': 3.5,
+    'Leland': 3,
+    'Marlin Motors': 7,
+    'Mauntley': 10,
+    'Normouth': 5,
+    'Pagani': 20,
+    'Ramsey': 5,
+    'Renault': 1.5,
+    'Romalpha': 2.5,
+    'Saleen': 3.5,
+    'Sentinel': 2.5,
+    'Silhouette': 14,
+    'Simple': 5,
+    'Sir Rodgers': 10,
+    'SirRodgers': 10,
+    'Skane': 18,
+    'Stuttgart': 4,
+    'Surrey': 12,
+    'Takeo': 3,
+    'Viking': 2,
+}
 
 def is_purchasable(make: str, model: str) -> bool:
     return (make.lower(), model.lower()) in PURCHASABLE_SET
 
-COMMON_CARS = GREENVILLE_CARS_BUDGET
-RARE_CARS = GREENVILLE_CARS_MID + GREENVILLE_CARS_PREMIUM
+COMMON_CARS = GREENVILLE_CARS_BUDGET + GREENVILLE_CARS_MID[:20]  # больше разнообразия
+RARE_CARS = GREENVILLE_CARS_MID[20:] + GREENVILLE_CARS_PREMIUM
 LEGENDARY_CARS = GREENVILLE_CARS_LEGENDARY
 
-YEARS = list(range(2014, 2026))
+YEARS = list(range(1995, 2026))
 
 WI_CITIES_RU = [
     "Милуоки", "Мадисон", "Грин-Бей", "Апплтон", "О-Клэр", "Кеноша",
     "Расин", "Ла-Кросс", "Шебойган", "Восау", "Джейнсвилл",
+    "Фонд-дю-Лак", "Белоит", "Манитовок", "Ошкош", "Стивенс-Пойнт",
 ]
 
 CONDITIONS = ["отличное", "хорошее", "очень хорошее", "обслужена", "без нареканий", "ездит отлично"]
@@ -369,14 +1112,10 @@ TITLES = ["чистый", "в наличии", "срочно", "торг уме�
 
 DAMAGED_TITLES = ["битый", "нерабочий", "на запчасти", "срочно", "в ремонт"]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-
-RARITY_WEIGHTS = {"common": 80, "damaged": 8, "rare": 9, "legendary": 3}
-RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.3, "rare": 2.5, "legendary": 8.0}
+RARITY_WEIGHTS = {"common": 70, "damaged": 10, "rare": 14, "legendary": 6}
+RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 2.5, "legendary": 8.0}
 RARITY_NAMES = {"common": "", "damaged": "💥 Битый", "rare": "⭐ Редкий", "legendary": "🔥🔥🔥 МЕГА-КАР 🔥🔥🔥"}
-RARITY_YEARS = {"common": (2014, 2025), "damaged": (2008, 2018), "rare": (2018, 2025), "legendary": (2020, 2025)}
+RARITY_YEARS = {"common": (1995, 2025), "damaged": (2005, 2018), "rare": (2015, 2025), "legendary": (2020, 2025)}
 
 
 def get_real_brand(make: str) -> str | None:
@@ -414,7 +1153,7 @@ def generate_car() -> dict:
         else:
             pool = COMMON_CARS
 
-        if rarity != "damaged" and random.random() < 0.30:
+        if rarity != "damaged" and random.random() < 0.10:
             make, model = random.choice(LICENSED_CARS)
         else:
             make, model = random.choice(pool)
@@ -424,13 +1163,16 @@ def generate_car() -> dict:
 
         yr_lo, yr_hi = RARITY_YEARS[rarity]
         year = random.randint(yr_lo, yr_hi)
-        miles = random.randint(5000, 180000)
-        base_prices = {2008: 2000, 2009: 2500, 2010: 3000, 2011: 3500, 2012: 4000, 2013: 5000,
-                        2014: 6000, 2015: 8000, 2016: 10000, 2017: 13000, 2018: 16000,
-                        2019: 19000, 2020: 22000, 2021: 26000, 2022: 30000, 2023: 35000,
-                        2024: 40000, 2025: 46000}
+        miles = random.randint(1000, 250000)
+        base_prices = {1995: 400, 1996: 500, 1997: 600, 1998: 800, 1999: 1000,
+                       2000: 1200, 2001: 1500, 2002: 2000, 2003: 2500, 2004: 3000,
+                       2005: 3500, 2006: 4000, 2007: 4500, 2008: 5000, 2009: 5500,
+                       2010: 6000, 2011: 7000, 2012: 8000, 2013: 9000,
+                       2014: 10000, 2015: 12000, 2016: 14000, 2017: 16000,
+                       2018: 18000, 2019: 20000, 2020: 23000, 2021: 27000,
+                       2022: 31000, 2023: 36000, 2024: 42000, 2025: 48000}
         brand_mult = REAL_BRAND_VALUE.get(make, 1.0)
-        price = int((base_prices.get(year, 15000) + random.randint(-3000, 6000)) * RARITY_MULTIPLIERS[rarity] * brand_mult)
+        price = int((base_prices.get(year, 10000) + random.randint(-4000, 8000)) * RARITY_MULTIPLIERS[rarity] * brand_mult)
         price = max(100, price)
         city = random.choice(WI_CITIES_RU)
         color = random.choice(COLORS)
@@ -464,85 +1206,7 @@ def generate_car() -> dict:
     return generate_car()
 
 
-async def _search_wiki_image(search_term: str) -> bytes | None:
-    try:
-        search_url = WIKI_SEARCH % search_term
-        async with aiohttp.ClientSession() as s:
-            async with s.get(search_url, headers=HEADERS, timeout=8) as r:
-                if r.status != 200:
-                    return None
-                data = await r.json()
-        pages = data.get("query", {}).get("search", [])
-        if not pages:
-            return None
-        title = pages[0]["title"]
-        img_url = WIKI_IMAGE % title.replace(" ", "_")
-        async with aiohttp.ClientSession() as s:
-            async with s.get(img_url, headers=HEADERS, timeout=8) as r:
-                if r.status != 200:
-                    return None
-                data2 = await r.json()
-        for pid, info in data2.get("query", {}).get("pages", {}).items():
-            thumb = info.get("thumbnail", {}).get("source")
-            if thumb:
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(thumb, headers=HEADERS, timeout=10) as r:
-                        if r.status == 200:
-                            return await r.read()
-    except Exception as e:
-        logger.warning("Wiki image search failed for '%s': %s", search_term, e)
-    return None
 
-
-def generate_placeholder_image(car: dict) -> bytes:
-    width, height = 800, 500
-    img = Image.new("RGB", (width, height), (20, 30, 55))
-    draw = ImageDraw.Draw(img)
-
-    try:
-        ftitle = ImageFont.truetype("C:\\Windows\\Fonts\\Arial.ttf", 44)
-        fsub = ImageFont.truetype("C:\\Windows\\Fonts\\Arial.ttf", 28)
-        finfo = ImageFont.truetype("C:\\Windows\\Fonts\\Arial.ttf", 20)
-    except Exception:
-        try:
-            ftitle = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
-            fsub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
-            finfo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-        except Exception:
-            ftitle = fsub = finfo = ImageFont.load_default()
-
-    draw.rectangle([0, 0, width, 6], fill=(60, 120, 255))
-    draw.text((40, 25), "Greenville, Wisconsin", fill=(100, 140, 220), font=fsub)
-    draw.text((40, 75), f"{car['year']} {car['make']} {car['model']}", fill=(255, 255, 255), font=ftitle)
-    price_color = (80, 255, 120) if car["rarity"] != "damaged" else (255, 100, 80)
-    draw.text((40, 140), f"${car['price']:,}", fill=price_color, font=fsub)
-    y = 215
-    for label, val in [("Пробег", f"{car['miles']:,} миль"), ("Цвет", car["color"]),
-                        ("VIN", car["vin"]), ("Локация", car["city"] + ", WI")]:
-        draw.text((40, y), f"{label}: {val}", fill=(180, 190, 210), font=finfo)
-        y += 32
-    rarity_colors = {"common": (100, 200, 255), "rare": (255, 200, 80), "legendary": (255, 80, 80), "damaged": (120, 120, 120)}
-    rc = rarity_colors.get(car["rarity"], (200, 200, 200))
-    draw.rectangle([width - 180, height - 55, width - 20, height - 25], fill=rc)
-    rtxt = car["rarity"].upper()
-    tw, _ = draw.textbbox((0, 0), rtxt, font=finfo)[2:4]
-    draw.text((width - 100 - tw // 2, height - 48), rtxt, fill=(255, 255, 255), font=finfo)
-    buf = BytesIO()
-    img.save(buf, format="JPEG", quality=88)
-    return buf.getvalue()
-
-
-async def fetch_car_image(make: str, model: str) -> bytes | None:
-    real_brand = get_real_brand(make)
-    searches = []
-    if real_brand:
-        searches.append(f"{real_brand} {model} car")
-    searches.append(f"{make} {model} car")
-    for term in searches:
-        img = await _search_wiki_image(term)
-        if img:
-            return img
-    return None
 
 
 def format_caption(car: dict, vehicle_id: int) -> str:
@@ -576,20 +1240,12 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
         car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
-    image = await fetch_car_image(car["make"], car["model"])
 
     try:
-        from aiogram.types import BufferedInputFile
-        send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-
-        if image:
-            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
-            await bot.send_photo(**send_args, caption=caption)
-        else:
-            send_args["text"] = caption
-            await bot.send_message(**send_args)
+        await bot.send_message(**send_args)
 
         await mark_listing_posted(car["guid"])
         return True
@@ -607,8 +1263,14 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
 async def post_new_car(bot, chat_id: int, message_thread_id: int | None = None) -> bool:
     for _ in range(50):
         car = generate_car()
-        if not await is_listing_posted(car["guid"]):
-            return await send_car(bot, chat_id, car, message_thread_id)
+        if await is_listing_posted(car["guid"]):
+            continue
+        if await is_model_recently_posted(car["make"], car["model"]):
+            continue
+        result = await send_car(bot, chat_id, car, message_thread_id)
+        if result:
+            await mark_model_posted(car["make"], car["model"])
+        return result
     return False
 
 
@@ -620,24 +1282,173 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
         car["color"], car["rarity"], chat_id,
     )
     caption = format_caption(car, vehicle_id)
-    image = await fetch_car_image(car["make"], car["model"])
     try:
-        from aiogram.types import BufferedInputFile
-        send_args = {"chat_id": chat_id, "parse_mode": "HTML"}
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
         if message_thread_id:
             send_args["message_thread_id"] = message_thread_id
-
-        if image:
-            send_args["photo"] = BufferedInputFile(image, filename="car.jpg")
-            await bot.send_photo(**send_args, caption=caption)
-        else:
-            send_args["text"] = caption
-            await bot.send_message(**send_args)
+        await bot.send_message(**send_args)
 
         await mark_listing_posted(car["guid"])
+        await mark_model_posted(car["make"], car["model"])
         badge = RARITY_NAMES[car["rarity"]]
         title = get_car_title(car["make"], car["model"])
         return f"✅ #{vehicle_id} {car['year']} {title} — {car['city']} {badge}"
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
+
+
+# ── House auto-poster ─────────────────────────────────────
+
+HOUSE_PRICES_BASE = [65000, 145000, 120000, 165000, 110000, 200000, 350000, 195000, 480000,
+                     150000, 135000, 250000, 155000, 380000, 210000, 175000, 40000, 185000,
+                     170000, 195000, 160000, 165000, 190000, 180000, 230000, 200000, 220000]
+
+HOUSE_FEATURES = [
+    "камин", "бассейн", "гараж на 2 машины", "патио", "новая кухня",
+    "новая кровля", "отремонтирован", "центральное кондиционирование",
+    "тёплые полы", "система безопасности", "джакузи", "подвал",
+    "мансарда", "терраса", "сад", "забор", "новая проводка",
+    "видеодомофон", "кладовка", "прачечная",
+]
+
+HOUSE_CONDITIONS = [
+    "отличное", "хорошее", "требует косметического ремонта",
+    "после капитального ремонта", "новое покрытие",
+]
+
+HOUSE_PRICE_VARIANTS = {
+    "отличное": 1.0, "хорошее": 0.9, "требует косметического ремонта": 0.7,
+    "после капитального ремонта": 1.15, "новое покрытие": 1.05,
+}
+
+
+def generate_house() -> dict:
+    ht_id = random.choice(list(range(1, 28)))
+    ht = None
+    for h in [
+        (1, "Mobile Home", 3, 2.5, 900, "Самый бюджетный вариант."),
+        (2, "90's 2-Story House", 3, 2.5, 1600, "Двухэтажный дом. Бильярд на 2 этаже."),
+        (3, "Average Suburban House", 3, 2.5, 1400, "Стандартный пригородный дом."),
+        (4, "Modern Average Suburban House", 3, 2.5, 1700, "Современный пригородный дом."),
+        (5, "Upper-Class 90's Bungalow", 2, 1.5, 1100, "Небольшое бунгало."),
+        (6, "Average 2-Story House", 4, 3.5, 2200, "Двухэтажный дом в фермерском стиле."),
+        (7, "Mansion #1", 5, 3.5, 4000, "Особняк!"),
+        (8, "Old Farmhouse", 4, 2.5, 2500, "Старый фермерский дом с камином."),
+        (9, "Lakeside Lodge", 4, 3.5, 3800, "Дом на озере с пирсом."),
+        (10, "Average 2-Story Suburban House", 3, 3.0, 1800, "Пригородный двухэтажный дом."),
+        (11, "Old Suburban House", 4, 4.0, 2000, "Старый пригородный дом."),
+        (12, "Original 2-Story Suburban House", 3, 3.0, 1800, "Редчайший дом! Из бета-версии."),
+        (13, "Average 2-Story Suburban House #3", 3, 2.5, 1700, "Пригородный двухэтажный дом."),
+        (14, "Mansion #2", 4, 3.5, 4200, "Второй особняк."),
+        (15, "Large 2-Story Suburban House", 3, 3.0, 2400, "Большой пригородный дом."),
+        (16, "Average Suburban House", 5, 3.0, 2300, "Просторный пригородный дом."),
+        (17, "Mobile Home", 1, 1.0, 500, "Маленький мобильный дом."),
+        (18, "Modern Triangle House", 3, 2.0, 1600, "Современный треугольный дом."),
+        (19, "Modern House", 3, 2.0, 1500, "Современный дом."),
+        (20, "2-Story Modern House", 3, 2.5, 1900, "Двухэтажный современный дом."),
+        (21, "Mid-Century Modern House", 3, 2.0, 1500, "Дом середины века."),
+        (22, "Modern House", 3, 2.0, 1500, "Современный дом."),
+        (23, "Cozy Rustic Suburban House", 3, 3.0, 2000, "Уютный деревенский дом."),
+        (24, "Average Suburban Family House", 4, 3.0, 2200, "Средний семейный дом."),
+        (25, "Large 2-Story House", 3, 3.0, 2500, "Большой двухэтажный дом."),
+        (26, "2-Story Suburban House", 4, 3.0, 2300, "Двухэтажный пригородный дом."),
+        (27, "2-Story Farm-Style House", 3, 3.0, 2400, "Двухэтажный фермерский дом."),
+    ]:
+        if h[0] == ht_id:
+            ht = h
+            break
+
+    nids = HOUSE_TYPE_NEIGHBORHOODS.get(ht_id, [0])
+    nb_id = random.choice(nids) + 1
+    nb_name = NEIGHBORHOODS[nb_id - 1]
+
+    base_price = HOUSE_PRICES_BASE[ht_id - 1]
+    condition = random.choice(HOUSE_CONDITIONS)
+    mult = HOUSE_PRICE_VARIANTS[condition]
+    price = int(base_price * mult * random.uniform(0.85, 1.15))
+    price = max(10000, price // 1000 * 1000)
+
+    features = random.sample(HOUSE_FEATURES, k=random.randint(2, 5))
+    desc = f"{ht[1]}. {' • '.join(features)}. Состояние: {condition}."
+
+    guid = f"house_{ht_id}_{nb_id}_{random.randint(100000, 999999)}"
+
+    return {
+        "house_type_id": ht_id,
+        "neighborhood_id": nb_id,
+        "type_name": ht[1],
+        "neighborhood": nb_name,
+        "bedrooms": ht[2],
+        "bathrooms": ht[3],
+        "sqft": ht[4],
+        "description": desc,
+        "price": price,
+        "condition": condition,
+        "guid": guid,
+    }
+
+
+def format_house_caption(house: dict, house_id: int) -> str:
+    return (
+        f"🏠 <b>{house['type_name']}</b>\n"
+        f"📍 Район: <b>{house['neighborhood']}</b>\n"
+        f"💰 ${house['price']:,}\n"
+        f"🛏 {house['bedrooms']} спальни | 🛁 {house['bathrooms']} ванны | 📐 {house['sqft']:,} кв.футов\n"
+        f"📝 {house['description']}\n"
+        f"🆔 Лот: <b>#{house_id}</b>"
+    )
+
+
+async def send_house(bot, chat_id: int, house: dict, message_thread_id: int | None = None) -> bool:
+    if await is_listing_posted(house["guid"]):
+        return False
+
+    house_id = await create_house_listing(
+        chat_id, house["house_type_id"], house["neighborhood_id"],
+        house["price"], house["guid"],
+    )
+    caption = format_house_caption(house, house_id)
+
+    try:
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
+        await bot.send_message(**send_args)
+
+        await mark_listing_posted(house["guid"])
+        return True
+    except Exception as e:
+        logger.error("House send error: %s", e)
+        if "chat not found" in str(e).lower():
+            try:
+                await set_config(f"poster_enabled:{chat_id}", "0")
+            except Exception:
+                pass
+        return False
+
+
+async def post_new_house(bot, chat_id: int, message_thread_id: int | None = None) -> bool:
+    for _ in range(50):
+        house = generate_house()
+        if not await is_listing_posted(house["guid"]):
+            return await send_house(bot, chat_id, house, message_thread_id)
+    return False
+
+
+async def force_post_house(bot, chat_id: int, message_thread_id: int | None = None) -> str:
+    house = generate_house()
+    house_id = await create_house_listing(
+        chat_id, house["house_type_id"], house["neighborhood_id"],
+        house["price"], house["guid"],
+    )
+    caption = format_house_caption(house, house_id)
+    try:
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
+        await bot.send_message(**send_args)
+        await mark_listing_posted(house["guid"])
+        return f"✅ #{house_id} {house['type_name']} — {house['neighborhood']}"
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
@@ -653,6 +1464,10 @@ async def auto_poster_loop(bot):
             counter += 1
             if counter % 40 == 0:
                 logger.info("Auto-poster heartbeat (tick %s)", counter)
+            if counter % 240 == 0:
+                cleaned = await clean_old_model_posts(72)
+                if cleaned:
+                    logger.info("Cleaned %s old model post records", cleaned)
 
             all_config = await get_config("poster_chats") or ""
             chat_ids = [c for c in all_config.split(",") if c]
@@ -660,36 +1475,58 @@ async def auto_poster_loop(bot):
 
             for cid_str in chat_ids:
                 chat_id = int(cid_str)
-                enabled = await get_config(f"poster_enabled:{chat_id}")
-                if enabled != "1":
-                    continue
 
-                interval_raw = await get_config(f"poster_interval:{chat_id}")
-                interval_min = int(interval_raw) if interval_raw and interval_raw.isdigit() else 120
-                target_raw = await get_config(f"poster_cars_channel:{chat_id}")
-                target = int(target_raw) if target_raw else chat_id
-                topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
-                topic = int(topic_raw) if topic_raw else None
+                # ── Cars ──
+                car_enabled = await get_config(f"poster_enabled:{chat_id}")
+                if car_enabled == "1":
+                    interval_raw = await get_config(f"poster_interval:{chat_id}")
+                    interval_min = int(interval_raw) if interval_raw and interval_raw.isdigit() else 120
+                    target_raw = await get_config(f"poster_cars_channel:{chat_id}")
+                    target = int(target_raw) if target_raw else chat_id
+                    topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
+                    topic = int(topic_raw) if topic_raw else None
 
-                last_key = f"poster_last_post:{chat_id}"
-                last_raw = await get_config(last_key)
-                last_ts = float(last_raw) if last_raw else 0.0
-                now = time.time()
-                elapsed = now - last_ts
-                needed = interval_min * 60
+                    last_key = f"poster_last_post:{chat_id}"
+                    last_raw = await get_config(last_key)
+                    last_ts = float(last_raw) if last_raw else 0.0
+                    now = time.time()
+                    elapsed = now - last_ts
+                    needed = interval_min * 60
 
-                logger.debug("Chat %s: enabled, interval=%s min, elapsed=%.0f/%.0f sec",
-                             chat_id, interval_min, elapsed, needed)
+                    if elapsed >= needed:
+                        logger.info("Posting car for chat %s (interval=%s min)", chat_id, interval_min)
+                        ok = await post_new_car(bot, target, topic)
+                        await set_config(last_key, str(now))
+                        if ok:
+                            errors = 0
+                        else:
+                            logger.warning("Car post failed for chat %s", chat_id)
 
-                if elapsed >= needed:
-                    logger.info("Posting car for chat %s (interval=%s min, elapsed=%.0f sec)",
-                                chat_id, interval_min, elapsed)
-                    ok = await post_new_car(bot, target, topic)
-                    await set_config(last_key, str(now))
-                    if ok:
-                        errors = 0
-                    else:
-                        logger.warning("Post failed for chat %s, will retry later", chat_id)
+                # ── Houses ──
+                house_enabled = await get_config(f"poster_houses_enabled:{chat_id}")
+                if house_enabled == "1":
+                    h_interval_raw = await get_config(f"poster_houses_interval:{chat_id}")
+                    h_interval = int(h_interval_raw) if h_interval_raw and h_interval_raw.isdigit() else 180
+                    h_target_raw = await get_config(f"poster_houses_channel:{chat_id}")
+                    h_target = int(h_target_raw) if h_target_raw else chat_id
+                    h_topic_raw = await get_config(f"poster_houses_topic:{chat_id}")
+                    h_topic = int(h_topic_raw) if h_topic_raw else None
+
+                    h_last_key = f"poster_houses_last:{chat_id}"
+                    h_last_raw = await get_config(h_last_key)
+                    h_last_ts = float(h_last_raw) if h_last_raw else 0.0
+                    now = time.time()
+                    h_elapsed = now - h_last_ts
+                    h_needed = h_interval * 60
+
+                    if h_elapsed >= h_needed:
+                        logger.info("Posting house for chat %s (interval=%s min)", chat_id, h_interval)
+                        ok = await post_new_house(bot, h_target, h_topic)
+                        await set_config(h_last_key, str(now))
+                        if ok:
+                            errors = 0
+                        else:
+                            logger.warning("House post failed for chat %s", chat_id)
         except Exception as e:
             logger.error("Auto-poster loop error: %s", e, exc_info=True)
             errors += 1
