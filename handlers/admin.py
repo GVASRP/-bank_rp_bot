@@ -426,7 +426,7 @@ async def cmd_auto_posts(message: Message):
         return
 
     chat_id = message.chat.id
-    args = message.text.split(maxsplit=2)
+    args = message.text.split(maxsplit=3)
 
     if len(args) < 2:
         car_enabled = await get_config(f"poster_enabled:{chat_id}")

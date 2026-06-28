@@ -211,7 +211,8 @@ async def cmd_my_cars(message: Message):
             f"#{idx} {status_emoji} {v['year']} {v['make']} {v['model']}\n"
             f"   🔑 {v['license_plate']} | 📍 {v['city']}{price_info}"
         )
-    lines.append("\n💡 <code>!продать НОМЕР цена</code> — выставить на продажу игрокам")
+    lines.append("\n💡 <code>!продать_авто НОМЕР</code> — слить в гос (60%)")
+    lines.append("💡 <code>!продать НОМЕР цена</code> — выставить игрокам")
     lines.append("💡 <code>!снять_продажу НОМЕР</code> — убрать из продажи")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
@@ -220,7 +221,7 @@ async def cmd_my_cars(message: Message):
 async def cmd_sell_car(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!продать_авто номер</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!продать_авто НОМЕР</code> — слить в гос (60%)", parse_mode="HTML")
         return
     try:
         pos = int(args[1])
@@ -236,7 +237,7 @@ async def cmd_sell_car(message: Message):
         await message.reply("❌ Это не ваш автомобиль")
         return
 
-    price = v["price"] // 2
+    price = int(v["price"] * 0.6)
     if not await sell_vehicle(v["id"], message.from_user.id):
         await message.reply("❌ Ошибка продажи")
         return
@@ -247,8 +248,8 @@ async def cmd_sell_car(message: Message):
                           f"Продажа авто #{v['id']} {v['year']} {v['make']} {v['model']}")
 
     await message.reply(
-        f"✅ Автомобиль #{v['id']} {v['year']} {v['make']} {v['model']} продан!\n"
-        f"💰 Выручка: {format_amount(price)} долларов (50%)\n"
+        f"✅ Автомобиль #{v['id']} {v['year']} {v['make']} {v['model']} продан в гос!\n"
+        f"💰 Выручка: {format_amount(price)} долларов (60%)\n"
         f"💳 Баланс: {format_amount(new_bal['balance'])} долларов",
         parse_mode="HTML",
     )
@@ -587,7 +588,7 @@ async def cmd_my_houses(message: Message):
             f"#{idx} {status_emoji} {h['type_name']}\n"
             f"   {emoji} <b>{nb}</b>{price_info}"
         )
-    lines.append("\n💡 <code>!продать_дом НОМЕР</code> — вернуть на рынок (50% стоимости)")
+    lines.append("\n💡 <code>!продать_дом НОМЕР</code> — слить в гос (65%)")
     lines.append("💡 <code>!продать_дом НОМЕР цена</code> — выставить игрокам")
     lines.append("💡 <code>!снять_продажу_дома НОМЕР</code> — убрать из продажи")
     await message.reply("\n".join(lines), parse_mode="HTML")
@@ -598,7 +599,7 @@ async def cmd_sell_house(message: Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 2:
         await message.reply("❌ Использование: <code>!продать_дом НОМЕР [цена]</code>\n"
-                           "Без цены — продажа на рынок за 50%\n"
+                           "Без цены — слить в гос (65%)\n"
                            "С ценой — выставление игрокам", parse_mode="HTML")
         return
     try:
@@ -638,7 +639,7 @@ async def cmd_sell_house(message: Message):
             return
         if h["status"] == "player_listed":
             await unlist_house(hid, message.from_user.id)
-        price = h["price"] // 2
+        price = int(h["price"] * 0.65)
         if not await sell_house(hid, message.from_user.id):
             await message.reply("❌ Ошибка продажи")
             return
@@ -646,8 +647,8 @@ async def cmd_sell_house(message: Message):
         await add_transaction("sell_house", None, message.from_user.id, price,
                               f"Продажа дома #{hid} {h['type_name']}")
         await message.reply(
-            f"✅ {h['type_name']} продан!\n"
-            f"💰 Выручка: {format_amount(price)} долларов (50% стоимости)",
+            f"✅ {h['type_name']} продан в гос!\n"
+            f"💰 Выручка: {format_amount(price)} долларов (65% стоимости)",
             parse_mode="HTML",
         )
 
