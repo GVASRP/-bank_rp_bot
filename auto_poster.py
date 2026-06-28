@@ -9,6 +9,7 @@ from database import (
     get_neighborhood, HOUSE_TYPE_NEIGHBORHOODS, NEIGHBORHOODS,
     is_model_recently_posted, mark_model_posted, clean_old_model_posts,
     get_all_rented_houses, collect_rent,
+    get_all_rented_cars, collect_car_rent,
 )
 
 logger = logging.getLogger(__name__)
@@ -1201,10 +1202,12 @@ def generate_car() -> dict:
 
         vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
         license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(100,999)}"
+        rent_price = max(100, int(price * random.uniform(0.005, 0.015)) // 100 * 100)
         return {
             "make": make, "model": model, "year": year, "miles": miles,
             "price": price, "city": city, "description": desc, "vin": vin,
             "license_plate": license_plate, "color": color, "rarity": rarity,
+            "rent_price": rent_price,
             "guid": f"gen_{rarity}_{vin}",
         }
     return generate_car()
@@ -1216,12 +1219,13 @@ def generate_car() -> dict:
 def format_caption(car: dict, vehicle_id: int) -> str:
     rarity_prefix = RARITY_NAMES[car["rarity"]]
     rarity_line = f"\n{rarity_prefix}" if rarity_prefix else ""
+    rent_line = f"\n🔑 ${car.get('rent_price', 0):,}/день в аренду" if car.get("rent_price", 0) > 0 else ""
     title = get_car_title(car["make"], car["model"])
     real_brand = get_real_brand(car["make"])
     lines = [
         f"🚗 <b>{car['year']} {title}</b>",
         f"📍 {car['city']}, WI",
-        f"💰 ${car['price']:,} | {car['miles']:,} миль",
+        f"💰 ${car['price']:,} | {car['miles']:,} миль{rent_line}",
         f"🎨 {car['color']}",
         f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}",
     ]
@@ -1241,7 +1245,7 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
-        car["color"], car["rarity"], chat_id,
+        car["color"], car["rarity"], chat_id, car.get("rent_price", 0),
     )
     caption = format_caption(car, vehicle_id)
 
@@ -1283,7 +1287,7 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
     vehicle_id = await create_vehicle(
         car["make"], car["model"], car["year"], car["price"],
         car["miles"], car["city"], car["vin"], car["license_plate"],
-        car["color"], car["rarity"], chat_id,
+        car["color"], car["rarity"], chat_id, car.get("rent_price", 0),
     )
     caption = format_caption(car, vehicle_id)
     try:
@@ -1552,6 +1556,18 @@ async def auto_poster_loop(bot):
                             logger.debug("Rent missed for house %s (missed %s days)", h["id"], result.get("missed"))
                 except Exception as e:
                     logger.error("Rent collection error: %s", e)
+            # ── Car rent collection ──
+            if counter % 4 == 0:
+                try:
+                    rc = await get_all_rented_cars()
+                    for v in rc:
+                        result = await collect_car_rent(v["id"])
+                        if result.get("action") == "collected":
+                            logger.info("Car rent collected for %s: $%s", v["id"], result["price"])
+                        elif result.get("action") == "evicted":
+                            logger.info("Tenant evicted from car %s (missed %s days)", v["id"], result.get("missed"))
+                except Exception as e:
+                    logger.error("Car rent collection error: %s", e)
         except Exception as e:
             logger.error("Auto-poster loop error: %s", e, exc_info=True)
             errors += 1

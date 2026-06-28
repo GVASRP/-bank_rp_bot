@@ -42,6 +42,12 @@ from database import (
     rent_house,
     get_tenant_house,
     evict_tenant,
+    list_car_for_rent,
+    unlist_car_rent,
+    get_for_rent_cars,
+    rent_car,
+    get_tenant_car,
+    evict_car_tenant,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
 from utils import format_amount, parse_amount, get_user_display
@@ -899,4 +905,156 @@ async def cmd_rental_houses(message: Message):
     if len(lines) == 1:
         await message.reply("📭 Нет доступных домов в аренду" + (f" в районе {target_nb}" if target_nb else ""))
         return
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+# ─── Car rental system ─────────────────────────────────────────
+
+
+@router.message(Command("сдать_авто", prefix="!/"))
+async def cmd_rent_out_car(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 3:
+        await message.reply("❌ Использование: <code>!сдать_авто НОМЕР цена_в_день</code>", parse_mode="HTML")
+        return
+    try:
+        position = int(args[1])
+        rent_price = int(args[2])
+    except ValueError:
+        await message.reply("❌ Номер авто и цена должны быть числами")
+        return
+    if rent_price < 50:
+        await message.reply("❌ Минимальная цена аренды: $50/день")
+        return
+    cars = await get_user_vehicles(message.from_user.id, message.chat.id)
+    if position < 1 or position > len(cars):
+        await message.reply(f"❌ У вас нет авто с номером {position}")
+        return
+    c = cars[position - 1]
+    if c["status"] in ("player_listed",):
+        await message.reply("❌ Это авто уже выставлено на продажу")
+        return
+    ok = await list_car_for_rent(c["id"], message.from_user.id, rent_price)
+    if not ok:
+        await message.reply("❌ Не удалось сдать авто. Возможно, оно уже сдано")
+        return
+    await message.reply(
+        f"✅ {c.get('year', '')} {c['make']} {c['model']} сдано в аренду за ${rent_price:,}/день\n"
+        f"👥 Игроки могут арендовать через <code>!арендовать_авто</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("снять_с_аренды_авто", prefix="!/"))
+async def cmd_unlist_car_rent(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!снять_с_аренды_авто НОМЕР</code>", parse_mode="HTML")
+        return
+    try:
+        position = int(args[1])
+    except ValueError:
+        await message.reply("❌ Номер должен быть числом")
+        return
+    cars = await get_user_vehicles(message.from_user.id, message.chat.id)
+    if position < 1 or position > len(cars):
+        await message.reply(f"❌ У вас нет авто с номером {position}")
+        return
+    c = cars[position - 1]
+    ok = await unlist_car_rent(c["id"], message.from_user.id)
+    if not ok:
+        await message.reply("❌ Авто не сдано в аренду или в нём живут")
+        return
+    await message.reply(f"✅ {c['make']} {c['model']} снят с аренды")
+
+
+@router.message(Command("арендовать_авто", prefix="!/"))
+async def cmd_rent_car(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!арендовать_авто НОМЕР</code>", parse_mode="HTML")
+        return
+    try:
+        position = int(args[1])
+    except ValueError:
+        await message.reply("❌ Номер должен быть числом")
+        return
+    existing = await get_tenant_car(message.from_user.id, message.chat.id)
+    if existing:
+        await message.reply(
+            f"❌ Вы уже арендуете {existing.get('make', '')} {existing.get('model', '')}. Сначала верните: <code>!вернуть_авто</code>",
+            parse_mode="HTML",
+        )
+        return
+    rentals = await get_for_rent_cars(message.chat.id)
+    if position < 1 or position > len(rentals):
+        await message.reply(f"❌ Нет авто с номером {position} в списке аренды")
+        return
+    c = rentals[position - 1]
+    ok, msg = await rent_car(c["id"], message.from_user.id)
+    if ok:
+        await message.reply(
+            f"✅ <b>Вы арендовали авто!</b>\n\n"
+            f"🚗 {c.get('year', '')} {c['make']} {c['model']}\n"
+            f"🎨 {c.get('color', '—')}\n"
+            f"💰 ${c['rent_price']:,}/день\n\n"
+            f"💡 Плата списывается ежедневно. Проверить: <code>!моя_аренда_авто</code>\n"
+            f"🚗 Вернуть: <code>!вернуть_авто</code>",
+            parse_mode="HTML",
+        )
+    else:
+        await message.reply(f"❌ {msg}", parse_mode="HTML")
+
+
+@router.message(Command("моя_аренда_авто", prefix="!/"))
+async def cmd_my_car_rent(message: Message):
+    c = await get_tenant_car(message.from_user.id, message.chat.id)
+    if not c:
+        await message.reply("❌ Вы не арендуете авто")
+        return
+    missed = c.get("rent_missed_days", 0) or 0
+    status = "✅ Оплачено"
+    if missed > 0:
+        status = f"⚠️ Просрочка {missed}/3 дней"
+        if missed >= 3:
+            status = "❌ Будет изъят"
+    paid = c.get("rent_paid_at", "—")
+    await message.reply(
+        f"🚗 <b>Ваша аренда авто</b>\n\n"
+        f"🚗 {c.get('year', '')} {c['make']} {c['model']}\n"
+        f"💰 ${c['rent_price']:,}/день\n"
+        f"🎨 {c.get('color', '—')}\n"
+        f"📅 Последняя оплата: {paid}\n"
+        f"📊 Статус: {status}\n\n"
+        f"🚗 Вернуть: <code>!вернуть_авто</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("вернуть_авто", prefix="!/"))
+async def cmd_return_car(message: Message):
+    c = await get_tenant_car(message.from_user.id, message.chat.id)
+    if not c:
+        await message.reply("❌ Вы не арендуете авто")
+        return
+    ok = await evict_car_tenant(c["id"])
+    if not ok:
+        await message.reply("❌ Не удалось вернуть авто")
+        return
+    await message.reply(f"🚗 Вы вернули {c['make']} {c['model']}")
+
+
+@router.message(Command("аренда_авто", prefix="!/"))
+async def cmd_rental_cars(message: Message):
+    rentals = await get_for_rent_cars(message.chat.id)
+    if not rentals:
+        await message.reply("📭 Нет авто в аренду")
+        return
+    lines = ["🚗 <b>Авто в аренду:</b>\n"]
+    for idx, c in enumerate(rentals, 1):
+        lines.append(
+            f"{idx}. 🚗 <b>{c.get('year', '')} {c['make']} {c['model']}</b>\n"
+            f"   🎨 {c.get('color', '—')} | 💰 ${c['rent_price']:,}/день\n"
+        )
+    lines.append("\n🔑 <code>!арендовать_авто НОМЕР</code> — арендовать")
     await message.reply("\n".join(lines), parse_mode="HTML")
