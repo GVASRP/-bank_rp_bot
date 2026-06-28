@@ -261,7 +261,7 @@ async def cmd_unlist_trailer(message: Message):
 @router.message(Command("контейнер_прицеп", prefix="!/"))
 async def cmd_trailer_container(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
-    CONTAINER_PRICE = 25000
+    CONTAINER_PRICE = 5000
     ok = await update_balance(message.from_user.id, -CONTAINER_PRICE, message.chat.id)
     if ok is None:
         await message.reply(f"❌ Недостаточно средств. Контейнер стоит ${CONTAINER_PRICE:,}")
