@@ -442,6 +442,23 @@ GREENVILLE_CARS_PREMIUM = [
     ('Stuttgart', 'Jogger Limo'),
 ]
 
+MODEL_PRICE_OVERRIDES = {
+    ("NVNAsport", "Acesera"): 3000000,
+    ("NVNA", "Acesera"): 2800000,
+    ("Pagani", "Zonda"): 2500000,
+    ("Pagani", "Huayra"): 2800000,
+    ("Jaguar", "XJ220"): 1500000,
+    ("Saleen", "S7"): 2000000,
+    ("Stuttgart", "Munster"): 1800000,
+    ("Chiara", "Berlinetta GT"): 2200000,
+    ("Ferdinand", "Ultima"): 2600000,
+    ("Silhouette", "Attraente"): 1900000,
+    ("Zephyr", "Vicieux"): 2400000,
+    ("Skane", "Rusa"): 1600000,
+    ("Surrey", "Speedlet"): 1200000,
+    ("Celestial", "Type-1"): 3500000,
+}
+
 GREENVILLE_CARS_LEGENDARY = [
     ('Stuttgart', 'Munster'),
     ('Chiara', 'Berlinetta GT'),
@@ -1152,7 +1169,7 @@ WORK_VEHICLES = [
 ]
 
 RARITY_WEIGHTS = {"common": 65, "damaged": 8, "rare": 18, "legendary": 9}
-RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 1.3, "legendary": 2.0}
+RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 8.0, "legendary": 55.0}
 RARITY_NAMES = {"common": "", "damaged": "💥 Битый", "rare": "⭐ Редкий", "legendary": "🔥🔥🔥 МЕГА-КАР 🔥🔥🔥"}
 CAR_YEARS = {
     ('Acadia', 'Syzygy'): {2020},
@@ -1705,15 +1722,13 @@ def generate_car(target_rarity: str | None = None) -> dict | None:
             yr_lo, yr_hi = RARITY_YEARS[rarity]
             year = random.randint(yr_lo, yr_hi)
         miles = random.randint(1000, 250000)
-        base_prices = {1995: 400, 1996: 500, 1997: 600, 1998: 800, 1999: 1000,
-                       2000: 1200, 2001: 1500, 2002: 2000, 2003: 2500, 2004: 3000,
-                       2005: 3500, 2006: 4000, 2007: 4500, 2008: 5000, 2009: 5500,
-                       2010: 6000, 2011: 7000, 2012: 8000, 2013: 9000,
-                       2014: 10000, 2015: 12000, 2016: 14000, 2017: 16000,
-                       2018: 18000, 2019: 20000, 2020: 23000, 2021: 27000,
-                       2022: 31000, 2023: 36000, 2024: 42000, 2025: 48000}
-        price = int((base_prices.get(year, 10000) + random.randint(-4000, 8000)) * RARITY_MULTIPLIERS[rarity])
-        price = max(100, min(price, 250000))
+        override = MODEL_PRICE_OVERRIDES.get((make, model))
+        if override:
+            price = override + random.randint(-50000, 50000)
+        else:
+            base_price = 5000 + (year - 1995) * 2000 if year >= 1995 else 5000
+            price = int((base_price + random.randint(-4000, 8000)) * RARITY_MULTIPLIERS[rarity])
+        price = max(100, min(price, 5000000))
         city = random.choice(WI_CITIES_RU)
         color = random.choice(COLORS)
 
