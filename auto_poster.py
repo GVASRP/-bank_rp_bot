@@ -1123,7 +1123,35 @@ TITLES = ["чистый", "в наличии", "срочно", "торг уме�
 
 DAMAGED_TITLES = ["битый", "нерабочий", "на запчасти", "срочно", "в ремонт"]
 
-RARITY_WEIGHTS = {"common": 70, "damaged": 10, "rare": 14, "legendary": 6}
+WORK_VEHICLES = [
+    ('Wolfsburg', 'Van'),
+    ('Stuttgart', 'Jogger 2500'),
+    ('Stuttgart', 'Jogger Limo'),
+    ('Explorer', 'Dependable 4300 Tow Truck'),
+    ('Falcon', 'Global Ambulance'),
+    ('Falcon', 'Advance DOT'),
+    ('Falcon', 'Advance Fire Rescue'),
+    ('Falcon', 'Advance Plow DOT Plow'),
+    ('Falcon', 'Departure Security'),
+    ('Falcon', 'Prime Fire Rescue'),
+    ('Falcon', 'Scavenger Fire Rescue'),
+    ('Falcon', 'Scavenger Metro'),
+    ('Falcon', 'Scavenger Security'),
+    ('Falcon', 'Aquarius Security'),
+    ('Falcon', 'Fission Interceptor Fire Police'),
+    ('Falcon', 'Fission Interceptor Security'),
+    ('Falcon', 'Fowarder Limo'),
+    ('Leland', 'DeRoute Hearse'),
+    ('Leland', 'DeRoute Limousine'),
+    ('Leland', 'LCS Hearse'),
+    ('Durant', 'Camion'),
+    ('Durant', 'Camion EXT'),
+    ('Durant', 'Camion HD'),
+    ('Durant', 'Voyager'),
+    ('Sentinel', 'Adventurer Limo'),
+]
+
+RARITY_WEIGHTS = {"common": 60, "damaged": 8, "rare": 20, "legendary": 12}
 RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 1.6, "legendary": 2.5}
 RARITY_NAMES = {"common": "", "damaged": "💥 Битый", "rare": "⭐ Редкий", "legendary": "🔥🔥🔥 МЕГА-КАР 🔥🔥🔥"}
 CAR_YEARS = {
@@ -1538,9 +1566,9 @@ def pick_rarity() -> str:
     return "damaged"
 
 
-def generate_car() -> dict:
+def generate_car(target_rarity: str | None = None) -> dict | None:
     for _ in range(200):
-        rarity = pick_rarity()
+        rarity = target_rarity if target_rarity else pick_rarity()
         if rarity == "legendary":
             pool = LEGENDARY_CARS
         elif rarity == "rare":
@@ -1552,6 +1580,8 @@ def generate_car() -> dict:
 
         if rarity != "damaged" and random.random() < 0.10:
             make, model = random.choice(LICENSED_CARS)
+        elif rarity in ("common", "damaged") and random.random() < 0.18:
+            make, model = random.choice(WORK_VEHICLES)
         else:
             make, model = random.choice(pool)
 
@@ -1664,8 +1694,20 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
 
 
 async def post_new_car(bot, chat_id: int, message_thread_id: int | None = None) -> bool:
+    # Раз в день гарантированно редкая или легендарная тачка
+    last_luxury_key = f"poster_luxury_post:{chat_id}"
+    last_luxury_raw = await get_config(last_luxury_key)
+    last_luxury = float(last_luxury_raw) if last_luxury_raw else 0.0
+    force_luxury = (time.time() - last_luxury) > 86400
+
     for _ in range(50):
-        car = generate_car()
+        if force_luxury:
+            target_rarity = random.choices(["rare", "legendary"], weights=[20, 12])[0]
+        else:
+            target_rarity = None
+        car = generate_car(target_rarity=target_rarity)
+        if car is None:
+            continue
         if await is_listing_posted(car["guid"]):
             continue
         if await is_model_recently_posted(car["make"], car["model"]):
@@ -1673,6 +1715,8 @@ async def post_new_car(bot, chat_id: int, message_thread_id: int | None = None) 
         result = await send_car(bot, chat_id, car, message_thread_id)
         if result:
             await mark_model_posted(car["make"], car["model"])
+            if force_luxury:
+                await set_config(last_luxury_key, str(time.time()))
         return result
     return False
 

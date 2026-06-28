@@ -1,6 +1,7 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+import random
 import time
 
 from database import (
@@ -28,6 +29,7 @@ router = Router()
 LAW_CATEGORIES = {"law"}
 CRIME_CATEGORIES = {"criminal"}
 DELIVERY_JOBS = {"Дальнобойщик"}
+WORK_SHIFT_JOBS = {"Таксист", "Водитель автобуса"}
 
 DELIVERY_LOCATIONS = [
     "Shell (ул. Главная, 142)",
@@ -370,5 +372,76 @@ async def cmd_delivery(message: Message):
         f"📍 <b>Куда:</b> {dest}",
         f"🛣 <b>Расстояние:</b> {distance} миль\n",
         f"📋 Отгрузили товар, получили накладную. Выезжаем!",
+    ]
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+_last_shift = {}
+_shift_count = {}
+
+SHIFT_LOCATIONS = [
+    "Торговый центр Greenville Mall", "Вокзал Гринвилл", "Аэропорт Гринвилл",
+    "Больница Гринвилл", "Полицейский участок", "Центральная площадь",
+    "Ресторан \"У озера\"", "Отель Greenville Inn", "Парк Миллер",
+    "Школа Гринвилл", "Университет", "Порт Гринвилл",
+    "Ферма Джонсона", "Автосервис \"У Боба\"", "Walmart Supercenter",
+]
+
+SHIFT_PASSENGERS = [
+    "мистера Смита", "семью Джонсонов", "профессора Харт",
+    "доктора Бенсона", "миссис Паркер", "группу студентов",
+    "бизнесмена мистера Ли", "пожилую пару", "туристов из Чикаго",
+    "военного в отпуске", "молодую маму с ребёнком", "музыкантов",
+]
+
+
+@router.message(Command("смена", prefix="!/"))
+async def cmd_shift(message: Message):
+    job = await get_user_job_info(message.from_user.id, message.chat.id)
+    if not job:
+        await message.reply("❌ У вас нет работы. <code>!работа</code> — посмотреть вакансии", parse_mode="HTML")
+        return
+    if job["name"] not in WORK_SHIFT_JOBS:
+        await message.reply("❌ Эта команда только для таксистов и водителей автобусов")
+        return
+
+    now = time.time()
+    last = _last_shift.get(message.from_user.id, 0)
+    if now - last < 300:
+        left = int(300 - (now - last))
+        await message.reply(f"⏳ Смена ещё не закончена. Отдохните {left} сек")
+        return
+    _last_shift[message.from_user.id] = now
+
+    _shift_count[message.from_user.id] = _shift_count.get(message.from_user.id, 0) + 1
+    shift_num = _shift_count[message.from_user.id]
+
+    passengers = random.choice(SHIFT_PASSENGERS)
+    origin = random.choice(SHIFT_LOCATIONS)
+    dest = random.choice([l for l in SHIFT_LOCATIONS if l != origin])
+    distance = random.randint(2, 25)
+
+    if job["name"] == "Водитель автобуса":
+        vehicle = "автобусе"
+        route = f"маршруту №{random.randint(1, 99)}"
+        bonus = random.randint(120, 250)
+    else:
+        vehicle = "такси"
+        route = f"заказу №{random.randint(100, 999)}"
+        bonus = random.randint(50, 120)
+
+    await update_balance(message.from_user.id, bonus, message.chat.id)
+    await add_transaction("shift", None, message.from_user.id, bonus,
+                          f"Смена #{shift_num}: {job['name']} — {passengers} ({origin} → {dest})")
+
+    lines = [
+        f"🚕 <b>Смена #{shift_num}</b>\n",
+        f"👤 <b>Пассажиры:</b> {passengers}",
+        f"📍 <b>Откуда:</b> {origin}",
+        f"📍 <b>Куда:</b> {dest}",
+        f"🛣 <b>Расстояние:</b> {distance} миль",
+        f"🚌 По {route}\n",
+        f"💰 <b>Заработано:</b> ${bonus:,}",
+        f"📊 <b>Всего смен:</b> {shift_num}",
     ]
     await message.reply("\n".join(lines), parse_mode="HTML")
