@@ -103,6 +103,29 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
             except Exception:
                 pass
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS organizations (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                owner_telegram_id BIGINT NOT NULL,
+                balance INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS org_members (
+                id SERIAL PRIMARY KEY,
+                org_id INTEGER NOT NULL REFERENCES organizations(id),
+                telegram_id BIGINT NOT NULL,
+                role TEXT DEFAULT 'member'
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_org_members_org ON org_members (org_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members (telegram_id)
+        """)
         # Migrate interest_rate from annual INTEGER to daily REAL
         for table in ("deposits", "credits"):
             try:
@@ -411,6 +434,21 @@ async def init_db():
                     status TEXT DEFAULT 'pending',
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
+                CREATE TABLE IF NOT EXISTS organizations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    owner_telegram_id INTEGER NOT NULL,
+                    balance INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS org_members (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    org_id INTEGER NOT NULL REFERENCES organizations(id),
+                    telegram_id INTEGER NOT NULL,
+                    role TEXT DEFAULT 'member'
+                );
+                CREATE INDEX IF NOT EXISTS idx_org_members_org ON org_members (org_id);
+                CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members (telegram_id);
                 DROP TABLE IF EXISTS user_salary;
             """)
             try:
@@ -3320,6 +3358,197 @@ async def collect_car_rent(vehicle_id: int) -> dict:
                     )
                     await conn.commit()
                     return {"ok": True, "action": "missed", "missed": missed}
+    finally:
+        await conn.close()
+
+
+# ─── Organization accounts ──────────────────────────────────────
+
+
+async def create_org(name: str, owner_telegram_id: int) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO organizations (name, owner_telegram_id) VALUES ($1, $2) RETURNING id",
+                name, owner_telegram_id,
+            )
+            org_id = row["id"]
+            await conn.execute(
+                "INSERT INTO org_members (org_id, telegram_id, role) VALUES ($1, $2, 'owner')",
+                org_id, owner_telegram_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO organizations (name, owner_telegram_id) VALUES (?, ?)",
+                (name, owner_telegram_id),
+            )
+            org_id = cursor.lastrowid
+            await conn.execute(
+                "INSERT INTO org_members (org_id, telegram_id, role) VALUES (?, ?, 'owner')",
+                (org_id, owner_telegram_id),
+            )
+            await conn.commit()
+        return org_id
+    finally:
+        await conn.close()
+
+
+async def get_org(org_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM organizations WHERE id = $1", org_id)
+        else:
+            cursor = await conn.execute("SELECT * FROM organizations WHERE id = ?", (org_id,))
+            row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_user_orgs(telegram_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT o.* FROM organizations o JOIN org_members m ON o.id = m.org_id WHERE m.telegram_id = $1",
+                telegram_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT o.* FROM organizations o JOIN org_members m ON o.id = m.org_id WHERE m.telegram_id = ?",
+                (telegram_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def update_org_balance(org_id: int, amount: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute(
+                "UPDATE organizations SET balance = balance + $1 WHERE id = $2 AND balance + $1 >= 0",
+                amount, org_id,
+            )
+            return "UPDATE 1" in (result or "")
+        else:
+            cursor = await conn.execute(
+                "UPDATE organizations SET balance = balance + ? WHERE id = ? AND balance + ? >= 0",
+                (amount, org_id, amount),
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def add_org_member(org_id: int, telegram_id: int, role: str = "member") -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            try:
+                await conn.execute(
+                    "INSERT INTO org_members (org_id, telegram_id, role) VALUES ($1, $2, $3)",
+                    org_id, telegram_id, role,
+                )
+                return True
+            except Exception:
+                return False
+        else:
+            try:
+                await conn.execute(
+                    "INSERT INTO org_members (org_id, telegram_id, role) VALUES (?, ?, ?)",
+                    (org_id, telegram_id, role),
+                )
+                await conn.commit()
+                return True
+            except Exception:
+                return False
+    finally:
+        await conn.close()
+
+
+async def remove_org_member(org_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute(
+                "DELETE FROM org_members WHERE org_id = $1 AND telegram_id = $2 AND role != 'owner'",
+                org_id, telegram_id,
+            )
+            return "DELETE 1" in (result or "")
+        else:
+            cursor = await conn.execute(
+                "DELETE FROM org_members WHERE org_id = ? AND telegram_id = ? AND role != 'owner'",
+                (org_id, telegram_id),
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def get_org_members(org_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT m.*, COALESCE(u.username, u.first_name, '') as name "
+                "FROM org_members m LEFT JOIN users u ON m.telegram_id = u.telegram_id "
+                "WHERE m.org_id = $1",
+                org_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT m.*, COALESCE(u.username, u.first_name, '') as name "
+                "FROM org_members m LEFT JOIN users u ON m.telegram_id = u.telegram_id "
+                "WHERE m.org_id = ?",
+                (org_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def is_org_member(org_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM org_members WHERE org_id = $1 AND telegram_id = $2",
+                org_id, telegram_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT 1 FROM org_members WHERE org_id = ? AND telegram_id = ?",
+                (org_id, telegram_id),
+            )
+            row = cursor.fetchone()
+        return row is not None
+    finally:
+        await conn.close()
+
+
+async def is_org_owner(org_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM org_members WHERE org_id = $1 AND telegram_id = $2 AND role = 'owner'",
+                org_id, telegram_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT 1 FROM org_members WHERE org_id = ? AND telegram_id = ? AND role = 'owner'",
+                (org_id, telegram_id),
+            )
+            row = cursor.fetchone()
+        return row is not None
     finally:
         await conn.close()
 
