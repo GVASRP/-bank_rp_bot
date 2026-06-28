@@ -20,6 +20,10 @@ from database import (
     create_vehicle,
     update_balance,
     add_transaction,
+    pay_from_org,
+    refund_org,
+    get_org,
+    is_org_member,
     seed_houses,
     get_house,
     get_available_houses,
@@ -50,7 +54,7 @@ from database import (
     evict_car_tenant,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
-from utils import format_amount, parse_amount, get_user_display
+from utils import format_amount, parse_amount, get_user_display, parse_org_flag
 
 router = Router()
 
@@ -124,14 +128,20 @@ async def cmd_vehicle_info(message: Message):
 
 @router.message(Command("купить", prefix="!/"))
 async def cmd_buy_car(message: Message):
-    args = message.text.split(maxsplit=1)
+    org_id, clean_text = parse_org_flag(message.text)
+    args = clean_text.strip().split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!купить номер</code>", parse_mode="HTML")
+        usage = "<code>!купить номер</code>" if not org_id else "<code>!купить номер орг ID</code>"
+        await message.reply(f"❌ Использование: {usage}", parse_mode="HTML")
         return
     try:
         pos = int(args[1])
     except ValueError:
         await message.reply("❌ Номер должен быть числом")
+        return
+
+    if org_id and not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
         return
 
     market = await get_available_vehicles(chat_id=message.chat.id)
@@ -153,44 +163,69 @@ async def cmd_buy_car(message: Message):
         await message.reply(f"❌ Автомобиль #{pos} не найден")
         return
 
-    if not await update_balance(message.from_user.id, -v["price"], message.chat.id):
-        user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
-        await message.reply(
-            f"❌ Недостаточно средств. Нужно: ${v['price']:,}, баланс: {format_amount(user['balance'] if user else 0)}",
-            parse_mode="HTML",
-        )
+    price = v["price"]
+    uid = message.from_user.id
+    paid_with_org = False
+
+    async def deduct():
+        nonlocal paid_with_org
+        if org_id:
+            if not await pay_from_org(org_id, uid, price, message.chat.id,
+                                      f"Покупка авто #{v['id']} {v['year']} {v['make']} {v['model']}"):
+                return False
+            paid_with_org = True
+            return True
+        return await update_balance(uid, -price, message.chat.id)
+
+    async def refund():
+        if paid_with_org:
+            await refund_org(org_id, uid, price, message.chat.id,
+                             f"Возврат за авто #{v['id']} {v['year']} {v['make']} {v['model']}")
+        else:
+            await update_balance(uid, price, message.chat.id)
+
+    if not await deduct():
+        bal = await get_user_by_telegram_id(uid, message.chat.id)
+        if org_id:
+            org = await get_org(org_id)
+            err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+        else:
+            err = f"❌ Недостаточно средств. Нужно: ${price:,}, баланс: {format_amount(bal['balance'] if bal else 0)}"
+        await message.reply(err, parse_mode="HTML")
         return
 
     if v["status"] == "player_listed":
-        result = await buy_player_vehicle(v["id"], message.from_user.id)
+        result = await buy_player_vehicle(v["id"], uid)
         if not result:
-            await update_balance(message.from_user.id, v["price"], message.chat.id)
+            await refund()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
             return
         seller_id, price = result
         await update_balance(seller_id, price, message.chat.id)
-        await add_transaction("buy_car", message.from_user.id, seller_id, price,
+        await add_transaction("buy_car", uid, seller_id, price,
                               f"Покупка у игрока #{v['id']} {v['year']} {v['make']} {v['model']}")
         seller_name = get_user_display(await get_user_by_telegram_id(seller_id))
+        source = f"🏢 Орг. #{org_id}" if paid_with_org else ""
         await message.reply(
             f"✅ Вы купили у {seller_name} <b>{v['year']} {v['make']} {v['model']}</b>!\n"
-            f"💰 Цена: ${price:,}\n"
+            f"💰 Цена: ${price:,}{' | ' + source if source else ''}\n"
             f"🔑 Номера: {v['license_plate']}\n"
             f"🆔 VIN: {v['vin']}",
             parse_mode="HTML",
         )
     else:
-        if not await buy_vehicle(v["id"], message.from_user.id):
-            await update_balance(message.from_user.id, v["price"], message.chat.id)
+        if not await buy_vehicle(v["id"], uid):
+            await refund()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
             return
-        await add_transaction("buy_car", message.from_user.id, None, v["price"],
+        await add_transaction("buy_car", uid, None, price,
                               f"Покупка из салона #{v['id']} {v['year']} {v['make']} {v['model']}")
-        new_bal = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
+        new_bal = await get_user_by_telegram_id(uid, message.chat.id)
+        source = f"🏢 Орг. #{org_id}" if paid_with_org else ""
         await message.reply(
             f"✅ Вы купили <b>{v['year']} {v['make']} {v['model']}</b>!\n"
-            f"💰 Цена: ${v['price']:,}\n"
-            f"💳 Остаток: {format_amount(new_bal['balance'])} долларов\n"
+            f"💰 Цена: ${price:,}{' | ' + source if source else ''}\n"
+            f"💳 Остаток: {format_amount(new_bal['balance']) if not paid_with_org else '— (оплачено орг.)'}\n"
             f"🔑 Номера: {v['license_plate']}\n"
             f"🆔 VIN: {v['vin']}",
             parse_mode="HTML",
@@ -335,13 +370,30 @@ CONTAINER_PRICE = 25_000
 
 @router.message(Command("контейнер", prefix="!/"))
 async def cmd_container(message: Message):
-    if not await update_balance(message.from_user.id, -CONTAINER_PRICE, message.chat.id):
-        user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
-        await message.reply(
-            f"❌ Недостаточно средств. Нужно: ${CONTAINER_PRICE:,}, баланс: {format_amount(user['balance'] if user else 0)}",
-            parse_mode="HTML",
-        )
+    org_id, _ = parse_org_flag(message.text)
+    if org_id and not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
         return
+
+    uid = message.from_user.id
+    paid_with_org = False
+
+    if org_id:
+        if not await pay_from_org(org_id, uid, CONTAINER_PRICE, message.chat.id,
+                                  "Контейнер с авто"):
+            org = await get_org(org_id)
+            err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+            await message.reply(err, parse_mode="HTML")
+            return
+        paid_with_org = True
+    else:
+        if not await update_balance(uid, -CONTAINER_PRICE, message.chat.id):
+            user = await get_user_by_telegram_id(uid, message.chat.id)
+            await message.reply(
+                f"❌ Недостаточно средств. Нужно: ${CONTAINER_PRICE:,}, баланс: {format_amount(user['balance'] if user else 0)}",
+                parse_mode="HTML",
+            )
+            return
 
     for _ in range(200):
         car = generate_car()
@@ -361,16 +413,20 @@ async def cmd_container(message: Message):
         car["miles"], car["city"], car["vin"], car["license_plate"],
         car["color"], car["rarity"], message.chat.id,
     )
-    await buy_vehicle(vehicle_id, message.from_user.id)
-    await add_transaction("container", message.from_user.id, None, CONTAINER_PRICE,
+    await buy_vehicle(vehicle_id, uid)
+    await add_transaction("container", uid, None, CONTAINER_PRICE,
                           f"Контейнер: {car['year']} {car['make']} {car['model']}")
+    if paid_with_org:
+        await add_transaction("org_payment", uid, None, -CONTAINER_PRICE,
+                              f"Контейнер из орг. #{org_id}: {car['year']} {car['make']} {car['model']}")
 
     await message.reply(
         f"🎁 <b>Вы открыли контейнер!</b>\n\n"
         f"🚗 {car['year']} {car['make']} {car['model']}\n"
         f"💰 Стоимость: ${car['price']:,} | 📍 {car['city']}\n"
         f"🔑 Номера: {car['license_plate']} | 🆔 VIN: {car['vin']}\n"
-        f"📝 {car['description']}",
+        f"📝 {car['description']}"
+        f"{' | 🏢 Орг.' if paid_with_org else ''}",
         parse_mode="HTML",
     )
 
@@ -512,9 +568,11 @@ async def cmd_house_info(message: Message):
 
 @router.message(Command("купить_дом", prefix="!/"))
 async def cmd_buy_house(message: Message):
-    args = message.text.split(maxsplit=1)
+    org_id, clean_text = parse_org_flag(message.text)
+    args = clean_text.strip().split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!купить_дом НОМЕР</code>", parse_mode="HTML")
+        usage = "<code>!купить_дом НОМЕР</code>" if not org_id else "<code>!купить_дом НОМЕР орг ID</code>"
+        await message.reply(f"❌ Использование: {usage}", parse_mode="HTML")
         return
     try:
         pos = int(args[1])
@@ -522,7 +580,10 @@ async def cmd_buy_house(message: Message):
         await message.reply("❌ Номер должен быть числом")
         return
 
-    # Find by position in combined listing
+    if org_id and not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
+        return
+
     market = await get_available_houses(message.chat.id)
     player = await get_player_listed_houses()
     player = [h for h in player if h["chat_id"] == message.chat.id]
@@ -538,42 +599,67 @@ async def cmd_buy_house(message: Message):
         await message.reply(f"❌ Дом #{pos} не найден")
         return
 
-    if not await update_balance(message.from_user.id, -h["price"], message.chat.id):
-        user_bal = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
-        await message.reply(
-            f"❌ Недостаточно средств. Нужно: ${h['price']:,}, баланс: {format_amount(user_bal['balance'] if user_bal else 0)}",
-            parse_mode="HTML",
-        )
+    price = h["price"]
+    hid = h["id"]
+    uid = message.from_user.id
+    paid_with_org = False
+
+    async def deduct():
+        nonlocal paid_with_org
+        if org_id:
+            if await pay_from_org(org_id, uid, price, message.chat.id,
+                                  f"Покупка дома #{hid} {h['type_name']}"):
+                paid_with_org = True
+                return True
+            return False
+        return await update_balance(uid, -price, message.chat.id)
+
+    async def refund_():
+        if paid_with_org:
+            await refund_org(org_id, uid, price, message.chat.id,
+                             f"Возврат за дом #{hid} {h['type_name']}")
+        else:
+            await update_balance(uid, price, message.chat.id)
+
+    if not await deduct():
+        if org_id:
+            org = await get_org(org_id)
+            err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+        else:
+            user_bal = await get_user_by_telegram_id(uid, message.chat.id)
+            err = f"❌ Недостаточно средств. Нужно: ${price:,}, баланс: {format_amount(user_bal['balance'] if user_bal else 0)}"
+        await message.reply(err, parse_mode="HTML")
         return
 
-    hid = h["id"]
     if h["status"] == "player_listed":
-        result = await buy_player_house(hid, message.from_user.id)
+        result = await buy_player_house(hid, uid)
         if not result:
-            await update_balance(message.from_user.id, h["price"], message.chat.id)
+            await refund_()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
             return
         seller_id, price = result
         await update_balance(seller_id, price, message.chat.id)
-        await add_transaction("buy_house", message.from_user.id, seller_id, price,
+        await add_transaction("buy_house", uid, seller_id, price,
                               f"Покупка дома у игрока #{hid} {h['type_name']}")
         seller_name = get_user_display(await get_user_by_telegram_id(seller_id))
+        source = "🏢 Орг." if paid_with_org else ""
         await message.reply(
             f"✅ Вы купили у {seller_name} <b>{h['type_name']}</b>!\n"
-            f"💰 Цена: ${price:,}",
+            f"💰 Цена: ${price:,}{' | ' + source if source else ''}",
             parse_mode="HTML",
         )
     else:
-        if not await buy_house(hid, message.from_user.id):
-            await update_balance(message.from_user.id, h["price"], message.chat.id)
+        if not await buy_house(hid, uid):
+            await refund_()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
             return
-        await add_transaction("buy_house", message.from_user.id, None, h["price"],
+        await add_transaction("buy_house", uid, None, price,
                               f"Покупка дома #{hid} {h['type_name']}")
+        source = "🏢 Орг." if paid_with_org else ""
         await message.reply(
             f"✅ Вы купили <b>{h['type_name']}</b>!\n"
             f"📍 <b>{h['neighborhood']}</b>\n"
-            f"💰 Цена: ${h['price']:,}",
+            f"💰 Цена: ${price:,}{' | ' + source if source else ''}",
             parse_mode="HTML",
         )
 
@@ -690,19 +776,34 @@ HOUSE_CONTAINER_PRICE = 50_000
 
 @router.message(Command("контейнер_дом", prefix="!/"))
 async def cmd_house_container(message: Message):
-    text = message.text.strip()
-    args = text.split(maxsplit=1)
-    target_nb = args[1] if len(args) > 1 else None
-
-    if not await update_balance(message.from_user.id, -HOUSE_CONTAINER_PRICE, message.chat.id):
-        user = await get_user_by_telegram_id(message.from_user.id, message.chat.id)
-        await message.reply(
-            f"❌ Недостаточно средств. Нужно: ${HOUSE_CONTAINER_PRICE:,}, баланс: {format_amount(user['balance'] if user else 0)}",
-            parse_mode="HTML",
-        )
+    org_id, clean_text = parse_org_flag(message.text)
+    if org_id and not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
         return
 
-    # Generate house (possibly filtered by neighborhood)
+    args = clean_text.strip().split(maxsplit=1)
+    target_nb = args[1] if len(args) > 1 else None
+
+    uid = message.from_user.id
+    paid_with_org = False
+
+    if org_id:
+        if not await pay_from_org(org_id, uid, HOUSE_CONTAINER_PRICE, message.chat.id,
+                                  "Контейнер с домом"):
+            org = await get_org(org_id)
+            err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+            await message.reply(err, parse_mode="HTML")
+            return
+        paid_with_org = True
+    else:
+        if not await update_balance(uid, -HOUSE_CONTAINER_PRICE, message.chat.id):
+            user = await get_user_by_telegram_id(uid, message.chat.id)
+            await message.reply(
+                f"❌ Недостаточно средств. Нужно: ${HOUSE_CONTAINER_PRICE:,}, баланс: {format_amount(user['balance'] if user else 0)}",
+                parse_mode="HTML",
+            )
+            return
+
     nbs = await get_all_neighborhoods()
     for _ in range(200):
         house = generate_house()
@@ -714,7 +815,6 @@ async def cmd_house_container(message: Message):
                     break
             if not match or house["neighborhood_id"] != match["id"]:
                 continue
-        # Reject low-value houses (avoid giving $40k house for $50k container)
         if house["price"] < HOUSE_CONTAINER_PRICE * 1.5:
             continue
         break
@@ -723,9 +823,12 @@ async def cmd_house_container(message: Message):
         message.chat.id, house["house_type_id"], house["neighborhood_id"],
         house["price"], house["guid"],
     )
-    await buy_house(house_id, message.from_user.id)
-    await add_transaction("container_house", message.from_user.id, None, HOUSE_CONTAINER_PRICE,
+    await buy_house(house_id, uid)
+    await add_transaction("container_house", uid, None, HOUSE_CONTAINER_PRICE,
                           f"Контейнер дом: {house['type_name']}")
+    if paid_with_org:
+        await add_transaction("org_payment", uid, None, -HOUSE_CONTAINER_PRICE,
+                              f"Контейнер дом из орг. #{org_id}: {house['type_name']}")
 
     nb = house["neighborhood"]
     emoji = NEIGHBORHOOD_EMOJIS.get(nb, "🏠")
@@ -734,7 +837,8 @@ async def cmd_house_container(message: Message):
         f"🏠 {house['type_name']}\n"
         f"{emoji} <b>{nb}</b>\n"
         f"💰 Рыночная стоимость: ${house['price']:,}\n"
-        f"🛏 {house['bedrooms']} спальни | 🛁 {house['bathrooms']} ванны | 📐 {house['sqft']:,} кв.футов",
+        f"🛏 {house['bedrooms']} спальни | 🛁 {house['bathrooms']} ванны | 📐 {house['sqft']:,} кв.футов"
+        f"{' | 🏢 Орг.' if paid_with_org else ''}",
         parse_mode="HTML",
     )
 

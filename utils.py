@@ -16,6 +16,14 @@ def format_amount(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
 
 
+def parse_org_flag(text: str) -> tuple[int | None, str]:
+    import re
+    m = re.search(r'\s+(?:орг|org)\s+(\d+)\s*$', text, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), text[:m.start()]
+    return None, text
+
+
 def parse_amount(text: str) -> int | None:
     text = text.replace(" ", "").replace(",", ".").strip()
     try:

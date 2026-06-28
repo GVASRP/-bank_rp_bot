@@ -3553,6 +3553,95 @@ async def is_org_owner(org_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
+async def pay_from_org(org_id: int, user_id: int, amount: int, chat_id: int, description: str = "") -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM org_members WHERE org_id = $1 AND telegram_id = $2 FOR UPDATE",
+                org_id, user_id,
+            )
+            if not row:
+                return False
+            org = await conn.fetchrow(
+                "SELECT * FROM organizations WHERE id = $1 FOR UPDATE",
+                org_id,
+            )
+            if not org or org["balance"] < amount:
+                return False
+            await conn.execute(
+                "UPDATE organizations SET balance = balance - $1 WHERE id = $2",
+                amount, org_id,
+            )
+            await conn.execute(
+                "INSERT INTO transactions (type, sender_telegram_id, amount, description) VALUES ($1, $2, $3, $4)",
+                "org_payment", user_id, -amount, description,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT 1 FROM org_members WHERE org_id = ? AND telegram_id = ?",
+                (org_id, user_id),
+            )
+            if not cursor.fetchone():
+                return False
+            cursor = await conn.execute(
+                "SELECT * FROM organizations WHERE id = ?",
+                (org_id,),
+            )
+            org = cursor.fetchone()
+            if not org or org["balance"] < amount:
+                return False
+            await conn.execute(
+                "UPDATE organizations SET balance = balance - ? WHERE id = ? AND balance - ? >= 0",
+                (amount, org_id, amount),
+            )
+            if cursor.rowcount == 0:
+                return False
+            from datetime import datetime
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await conn.execute(
+                "INSERT INTO transactions (type, sender_telegram_id, amount, description, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("org_payment", user_id, -amount, description, now_str),
+            )
+            await conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        await conn.close()
+
+
+async def refund_org(org_id: int, user_id: int, amount: int, chat_id: int, description: str = "") -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute(
+                "UPDATE organizations SET balance = balance + $1 WHERE id = $2",
+                amount, org_id,
+            )
+            await conn.execute(
+                "INSERT INTO transactions (type, sender_telegram_id, amount, description) VALUES ($1, $2, $3, $4)",
+                "org_refund", user_id, amount, description,
+            )
+        else:
+            await conn.execute(
+                "UPDATE organizations SET balance = balance + ? WHERE id = ?",
+                (amount, org_id),
+            )
+            from datetime import datetime
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await conn.execute(
+                "INSERT INTO transactions (type, sender_telegram_id, amount, description, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("org_refund", user_id, amount, description, now_str),
+            )
+            await conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        await conn.close()
+
+
 # ────────────────────────────────────────────────────────────────
 
 

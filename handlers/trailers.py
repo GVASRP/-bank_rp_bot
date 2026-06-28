@@ -17,9 +17,13 @@ from database import (
     update_balance,
     add_transaction,
     get_vehicle,
+    pay_from_org,
+    refund_org,
+    get_org,
+    is_org_member,
 )
 from auto_poster import generate_trailer, format_trailer_caption
-from utils import format_amount, parse_amount, resolve_target
+from utils import format_amount, parse_amount, resolve_target, parse_org_flag
 
 router = Router()
 
@@ -63,14 +67,20 @@ async def cmd_trailers(message: Message):
 @router.message(Command("купить_прицеп", prefix="!/"))
 async def cmd_buy_trailer(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
-    args = message.text.split(maxsplit=1)
+    org_id, clean_text = parse_org_flag(message.text)
+    args = clean_text.strip().split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!купить_прицеп НОМЕР</code>", parse_mode="HTML")
+        usage = "<code>!купить_прицеп НОМЕР</code>" if not org_id else "<code>!купить_прицеп НОМЕР орг ID</code>"
+        await message.reply(f"❌ Использование: {usage}", parse_mode="HTML")
         return
     try:
         pos = int(args[1])
     except ValueError:
         await message.reply("❌ Укажите номер из списка")
+        return
+
+    if org_id and not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
         return
 
     market = await get_available_trailers(chat_id=message.chat.id)
@@ -83,6 +93,17 @@ async def cmd_buy_trailer(message: Message):
 
     price = vehicle["price"]
     uid = message.from_user.id
+    paid_with_org = False
+
+    async def deduct():
+        nonlocal paid_with_org
+        if org_id:
+            if await pay_from_org(org_id, uid, price, message.chat.id,
+                                  f"Покупка прицепа #{vehicle['id']} {vehicle['year']} {vehicle['make']} {vehicle['model']}"):
+                paid_with_org = True
+                return True
+            return False
+        return await update_balance(uid, -price, message.chat.id)
 
     if vehicle["status"] == "player_listed":
         result = await buy_player_trailer(vehicle["id"], uid)
@@ -90,18 +111,23 @@ async def cmd_buy_trailer(message: Message):
             await message.reply("❌ Прицеп уже куплен")
             return
         seller_id, price = result
-        ok = await update_balance(uid, -price, message.chat.id)
-        if ok is None:
-            await message.reply("❌ Недостаточно средств")
+        if not await deduct():
+            if paid_with_org:
+                org = await get_org(org_id)
+                err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+            else:
+                err = "❌ Недостаточно средств"
+            await message.reply(err, parse_mode="HTML")
             return
         await update_balance(seller_id, price, message.chat.id)
         name = f"{vehicle['make']} {vehicle['model']}"
         await add_transaction("buy_trailer", None, uid, -price, f"Покупка прицепа {name} у игрока")
         await add_transaction("sell_trailer", None, seller_id, price, f"Продажа прицепа {name} игроку")
+        source = "🏢 Орг." if paid_with_org else ""
         await message.reply(
             f"✅ <b>Прицеп куплен у игрока</b>\n"
             f"🚛 {vehicle['year']} {vehicle['make']} {vehicle['model']}\n"
-            f"💰 ${price:,}",
+            f"💰 ${price:,}{' | ' + source if source else ''}",
             parse_mode="HTML",
         )
     else:
@@ -109,16 +135,21 @@ async def cmd_buy_trailer(message: Message):
         if not ok:
             await message.reply("❌ Прицеп уже куплен")
             return
-        ok = await update_balance(uid, -price, message.chat.id)
-        if ok is None:
-            await message.reply("❌ Недостаточно средств")
+        if not await deduct():
+            if paid_with_org:
+                org = await get_org(org_id)
+                err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+            else:
+                err = "❌ Недостаточно средств"
+            await message.reply(err, parse_mode="HTML")
             return
         name = f"{vehicle['make']} {vehicle['model']}"
         await add_transaction("buy_trailer", None, uid, -price, f"Покупка прицепа {name} на Truck Planet")
+        source = "🏢 Орг." if paid_with_org else ""
         await message.reply(
             f"✅ <b>Прицеп куплен</b>\n"
             f"🚛 {vehicle['year']} {vehicle['make']} {vehicle['model']}\n"
-            f"💰 ${price:,}",
+            f"💰 ${price:,}{' | ' + source if source else ''}",
             parse_mode="HTML",
         )
 
@@ -261,10 +292,27 @@ async def cmd_unlist_trailer(message: Message):
 async def cmd_trailer_container(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
     CONTAINER_PRICE = 5000
-    ok = await update_balance(message.from_user.id, -CONTAINER_PRICE, message.chat.id)
-    if ok is None:
-        await message.reply(f"❌ Недостаточно средств. Контейнер стоит ${CONTAINER_PRICE:,}")
+    org_id, _ = parse_org_flag(message.text)
+
+    if org_id and not await is_org_member(org_id, message.from_user.id):
+        await message.reply("❌ Вы не участник этой организации")
         return
+
+    uid = message.from_user.id
+    paid_with_org = False
+
+    if org_id:
+        if not await pay_from_org(org_id, uid, CONTAINER_PRICE, message.chat.id,
+                                  "Контейнер с прицепом"):
+            org = await get_org(org_id)
+            err = f"❌ Недостаточно средств в организации. Баланс: ${org['balance'] if org else 0:,}"
+            await message.reply(err, parse_mode="HTML")
+            return
+        paid_with_org = True
+    else:
+        if not await update_balance(uid, -CONTAINER_PRICE, message.chat.id):
+            await message.reply(f"❌ Недостаточно средств. Контейнер стоит ${CONTAINER_PRICE:,}")
+            return
 
     trailer = generate_trailer()
     vehicle_id = await create_trailer(
@@ -273,18 +321,21 @@ async def cmd_trailer_container(message: Message):
         trailer["color"], trailer["rarity"], message.chat.id,
     )
 
-    ok2 = await buy_trailer(vehicle_id, message.from_user.id)
+    ok2 = await buy_trailer(vehicle_id, uid)
     if not ok2:
         await message.reply("❌ Ошибка при выдаче прицепа")
         return
 
     name = f"{trailer['year']} {trailer['make']} {trailer['model']}"
-    await add_transaction("container_trailer", None, message.from_user.id, -CONTAINER_PRICE, f"Контейнер с прицепом: {name}")
+    await add_transaction("container_trailer", None, uid, -CONTAINER_PRICE, f"Контейнер с прицепом: {name}")
+    if paid_with_org:
+        await add_transaction("org_payment", uid, None, -CONTAINER_PRICE,
+                              f"Контейнер прицеп из орг. #{org_id}: {name}")
 
     await message.reply(
         f"🎁 <b>Вы открыли контейнер с прицепом!</b>\n\n"
         f"🚛 {name}\n"
         f"💰 Оценка: ${trailer['price']:,}\n"
-        f"🆔 ID: #{vehicle_id}",
+        f"🆔 ID: #{vehicle_id}{' | 🏢 Орг.' if paid_with_org else ''}",
         parse_mode="HTML",
     )
