@@ -124,6 +124,10 @@ async def init_db():
             except Exception:
                 pass
         try:
+            await conn.execute("ALTER TABLE vehicles ADD COLUMN vehicle_type TEXT DEFAULT 'car'")
+        except Exception:
+            pass
+        try:
             await seed_house_types()
         except Exception:
             pass
@@ -446,6 +450,11 @@ async def init_db():
                     await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col}")
                     await conn.commit()
                 except Exception:
+                    pass
+            try:
+                await conn.execute("ALTER TABLE vehicles ADD COLUMN vehicle_type TEXT DEFAULT 'car'")
+                await conn.commit()
+            except Exception:
                     pass
             # Migration: add chat_id, neighborhood, house_type_id, neighborhood_id, guid, rent columns to houses
             for col in ("chat_id INTEGER DEFAULT 0", "neighborhood TEXT DEFAULT ''", "house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT", "rent_price INTEGER DEFAULT 0", "tenant_telegram_id INTEGER", "rent_paid_at TEXT", "rent_missed_days INTEGER DEFAULT 0"):
@@ -1183,32 +1192,32 @@ async def get_vehicle(vehicle_id: int) -> dict | None:
         await conn.close()
 
 
-async def get_available_vehicles(chat_id: int | None = None) -> list:
+async def get_available_vehicles(chat_id: int | None = None, vehicle_type: str = 'car') -> list:
     conn = await get_conn()
     try:
         if _is_pg:
             if chat_id is not None:
-                rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' AND chat_id = $1 ORDER BY created_at DESC", chat_id)
+                rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' AND chat_id = $1 AND vehicle_type = $2 ORDER BY created_at DESC", chat_id, vehicle_type)
             else:
-                rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
+                rows = await conn.fetch("SELECT * FROM vehicles WHERE status = 'available' AND vehicle_type = $1 ORDER BY created_at DESC", vehicle_type)
         else:
             if chat_id is not None:
-                cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' AND chat_id = ? ORDER BY created_at DESC", (chat_id,))
+                cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' AND chat_id = ? AND vehicle_type = ? ORDER BY created_at DESC", (chat_id, vehicle_type))
             else:
-                cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' ORDER BY created_at DESC")
+                cursor = await conn.execute("SELECT * FROM vehicles WHERE status = 'available' AND vehicle_type = ? ORDER BY created_at DESC", (vehicle_type,))
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
         await conn.close()
 
 
-async def get_user_vehicles(telegram_id: int) -> list:
+async def get_user_vehicles(telegram_id: int, vehicle_type: str = 'car') -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 ORDER BY id ASC", telegram_id)
+            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 AND vehicle_type = $2 ORDER BY id ASC", telegram_id, vehicle_type)
         else:
-            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? ORDER BY id ASC", (telegram_id,))
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? AND vehicle_type = ? ORDER BY id ASC", (telegram_id, vehicle_type))
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -1742,19 +1751,230 @@ async def buy_player_vehicle(vehicle_id: int, buyer_id: int) -> bool:
         await conn.close()
 
 
-async def get_player_listed_vehicles(chat_id: int = 0) -> list:
+async def get_player_listed_vehicles(chat_id: int = 0, vehicle_type: str = 'car') -> list:
     conn = await get_conn()
     try:
         if _is_pg:
             rows = await conn.fetch(
-                "SELECT * FROM vehicles WHERE status = 'player_listed' ORDER BY created_at DESC",
+                "SELECT * FROM vehicles WHERE status = 'player_listed' AND vehicle_type = $1 ORDER BY created_at DESC",
+                vehicle_type,
             )
         else:
             cursor = await conn.execute(
-                "SELECT * FROM vehicles WHERE status = 'player_listed' ORDER BY created_at DESC",
+                "SELECT * FROM vehicles WHERE status = 'player_listed' AND vehicle_type = ? ORDER BY created_at DESC",
+                (vehicle_type,),
             )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# ── Trailer functions ──────────────────────────────────────
+
+
+async def get_available_trailers(chat_id: int | None = None) -> list:
+    return await get_available_vehicles(chat_id=chat_id, vehicle_type='trailer')
+
+
+async def get_user_trailers(telegram_id: int) -> list:
+    return await get_user_vehicles(telegram_id, vehicle_type='trailer')
+
+
+async def get_player_listed_trailers(chat_id: int = 0) -> list:
+    return await get_player_listed_vehicles(chat_id=chat_id, vehicle_type='trailer')
+
+
+async def get_trailer_by_position(chat_id: int, position: int) -> dict | None:
+    trailers = await get_available_trailers(chat_id=chat_id)
+    if position < 1 or position > len(trailers):
+        return None
+    return trailers[position - 1]
+
+
+async def create_trailer(make: str, model: str, year: int, price: int, miles: int,
+                         city: str, vin: str, license_plate: str,
+                         color: str = "", rarity: str = "common", chat_id: int = 0) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id, vehicle_type) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'trailer') RETURNING id",
+                make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO vehicles (make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id, vehicle_type) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,'trailer')",
+                (make, model, year, price, miles, city, vin, license_plate, color, rarity, chat_id),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        await conn.close()
+
+
+async def buy_trailer(vehicle_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND status = 'available' AND vehicle_type = 'trailer' FOR UPDATE",
+                vehicle_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
+                telegram_id, vehicle_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND status = 'available' AND vehicle_type = 'trailer'",
+                (vehicle_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
+                (telegram_id, vehicle_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def sell_trailer(vehicle_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' AND vehicle_type = 'trailer' FOR UPDATE",
+                vehicle_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE id = $1",
+                vehicle_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'sold' AND vehicle_type = 'trailer'",
+                (vehicle_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE id = ?",
+                (vehicle_id,),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def list_trailer_for_sale(vehicle_id: int, telegram_id: int, price: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' AND vehicle_type = 'trailer' FOR UPDATE",
+                vehicle_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET status = 'player_listed', price = $1 WHERE id = $2",
+                price, vehicle_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'sold' AND vehicle_type = 'trailer'",
+                (vehicle_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE vehicles SET status = 'player_listed', price = ? WHERE id = ?",
+                (price, vehicle_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def unlist_trailer(vehicle_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'player_listed' AND vehicle_type = 'trailer' FOR UPDATE",
+                vehicle_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute("UPDATE vehicles SET status = 'sold' WHERE id = $1", vehicle_id)
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'player_listed' AND vehicle_type = 'trailer'",
+                (vehicle_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute("UPDATE vehicles SET status = 'sold' WHERE id = ?", (vehicle_id,))
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def buy_player_trailer(vehicle_id: int, buyer_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM vehicles WHERE id = $1 AND status = 'player_listed' AND vehicle_type = 'trailer' FOR UPDATE",
+                vehicle_id,
+            )
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2",
+                buyer_id, vehicle_id,
+            )
+            return seller_id, price
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM vehicles WHERE id = ? AND status = 'player_listed' AND vehicle_type = 'trailer'",
+                (vehicle_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?",
+                (buyer_id, vehicle_id),
+            )
+            await conn.commit()
+            return seller_id, price
     finally:
         await conn.close()
 

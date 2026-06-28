@@ -4,7 +4,7 @@ import random
 import time
 
 from database import (
-    is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle,
+    is_listing_posted, mark_listing_posted, get_config, set_config, create_vehicle, create_trailer,
     create_house_listing, get_house_type, get_all_house_types, get_all_neighborhoods,
     get_neighborhood, HOUSE_TYPE_NEIGHBORHOODS, NEIGHBORHOODS,
     is_model_recently_posted, mark_model_posted, clean_old_model_posts,
@@ -1542,6 +1542,119 @@ CAR_YEARS = {
 
 RARITY_YEARS = {"common": (1940, 2026), "damaged": (1940, 2026), "rare": (1940, 2026), "legendary": (1940, 2026)}
 
+# ── Trailers ───────────────────────────────────────────────
+
+TRAILER_BRAND = "Durable"
+
+TRAILER_COMMON = [
+    ("4' x 6' Enclosed Box Trailer", 3500),
+    ("6' x 8' Trailer", 4000),
+    ("12' x 6' Enclosed Box Trailer", 5500),
+    ("12' x 6' Off-Road Trailer", 6500),
+    ("Boat Trailer", 5000),
+    ("16' x 6' Enclosed Box Trailer", 7500),
+    ("16' x 8' Car Transporter", 9000),
+    ("15' x 8' Tear Drop Camper", 12000),
+    ("10' x 6' Concrete Mixer", 10000),
+    ("16' x 8' Camper", 15000),
+    ("20' x 8' Dual Axle Camper", 22000),
+    ("8' x 24' Car Transporter", 14000),
+]
+
+TRAILER_RARE = [
+    ("Sign Message Trailer", 18000),
+    ("Speed Readout Trailer", 20000),
+]
+
+TRAILER_DESCRIPTIONS = {
+    "Enclosed": "Закрытый прицеп для перевозки грузов. Идеально подходит для хранения и транспортировки.",
+    "Off-Road": "Внедорожный прицеп для тяжёлых условий эксплуатации.",
+    "Car Transporter": "Автовоз для перевозки автомобилей. Незаменим для автосалонов и эвакуаторов.",
+    "Camper": "Жилой прицеп-дача. Всё необходимое для комфортного отдыха на природе.",
+    "Dual Axle Camper": "Большой жилой прицеп с двумя осями. Простор и комфорт для всей семьи!",
+    "Tear Drop Camper": "Компактный жилой прицеп-капля. Лёгкий и экономичный.",
+    "Trailer": "Универсальный открытый прицеп для перевозки любых грузов.",
+    "Boat Trailer": "Прицеп для перевозки лодок и катеров.",
+    "Concrete Mixer": "Прицеп-бетономешалка для строительных работ.",
+    "Sign Message": "Информационный прицеп с электронным табло. Используется дорожными службами.",
+    "Speed Readout": "Прицеп с радарным табло скорости. Помогает контролировать скорость на дорогах.",
+}
+
+TRAILER_TITLES = [
+    "Грузовой транспорт",
+    "Коммерческий прицеп",
+    "Промышленный прицеп",
+    "Прицеп специального назначения",
+    "Прицеп для бизнеса",
+]
+
+TRAILER_CONDITIONS = [
+    "Отличное техническое состояние", "В хорошем состоянии", "Без нареканий",
+    "В идеальном состоянии", "Как новый", "Готов к эксплуатации",
+]
+
+
+def generate_trailer(target_rarity: str | None = None) -> dict:
+    for _ in range(50):
+        rarity = target_rarity if target_rarity else random.choices(
+            ["common", "rare"], weights=[70, 30], k=1
+        )[0]
+        if rarity == "rare":
+            model, base_price = random.choice(TRAILER_RARE)
+        else:
+            model, base_price = random.choice(TRAILER_COMMON)
+
+        year = 2024 if rarity == "rare" else random.randint(2019, 2024)
+        price_variance = random.randint(-2000, 3000)
+        price = max(500, int(base_price + price_variance))
+        miles = random.randint(500, 120000)
+
+        desc_key = model.split("'")[-1].strip() if "'" in model else model
+        for key, desc in TRAILER_DESCRIPTIONS.items():
+            if key in model:
+                description = desc
+                break
+        else:
+            description = "Надёжный прицеп для решения любых задач."
+
+        title = random.choice(TRAILER_TITLES)
+        condition = random.choice(TRAILER_CONDITIONS)
+        features = random.sample(list(TRAILER_DESCRIPTIONS.values()), k=random.randint(2, 4))
+        rarity_label = "⭐ Редкий (Public Services)" if rarity == "rare" else ""
+        full_desc = (
+            f"{condition}. {' • '.join(features)}. {title}. {description}"
+        )
+
+        vin = "TR" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=15))
+        license_plate = f"TRL-{random.randint(100, 999)}"
+        color = random.choice(COLORS)
+
+        return {
+            "make": TRAILER_BRAND,
+            "model": model,
+            "year": year,
+            "price": price,
+            "miles": miles,
+            "description": full_desc,
+            "vin": vin,
+            "license_plate": license_plate,
+            "color": color,
+            "rarity": rarity,
+            "guid": f"trl_{rarity}_{vin}",
+        }
+    return generate_trailer()
+
+
+def format_trailer_caption(trailer: dict, vehicle_id: int) -> str:
+    rarity_line = "\n⭐ Редкий (Public Services)" if trailer["rarity"] == "rare" else ""
+    return (
+        f"🚛 <b>{trailer['year']} {trailer['make']} {trailer['model']}</b>\n"
+        f"📍 Truck Planet, Greenville, WI\n"
+        f"💰 ${trailer['price']:,} | {trailer['miles']:,} миль\n"
+        f"🎨 {trailer['color']}\n"
+        f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}"
+    )
+
 
 def get_real_brand(make: str) -> str | None:
     return BRAND_TO_REAL.get(make)
@@ -1907,6 +2020,70 @@ async def force_post_house(bot, chat_id: int, message_thread_id: int | None = No
         return f"❌ Ошибка: {e}"
 
 
+# ── Trailer auto-poster ──────────────────────────────────
+
+
+async def send_trailer(bot, chat_id: int, trailer: dict, message_thread_id: int | None = None) -> bool:
+    if await is_listing_posted(trailer["guid"]):
+        return False
+
+    vehicle_id = await create_trailer(
+        trailer["make"], trailer["model"], trailer["year"], trailer["price"],
+        trailer["miles"], trailer["description"], trailer["vin"], trailer["license_plate"],
+        trailer["color"], trailer["rarity"], chat_id,
+    )
+    caption = format_trailer_caption(trailer, vehicle_id)
+
+    try:
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
+        await bot.send_message(**send_args)
+
+        await mark_listing_posted(trailer["guid"])
+        return True
+    except Exception as e:
+        logger.error("Trailer send error: %s", e)
+        if "chat not found" in str(e).lower():
+            try:
+                await set_config(f"poster_enabled:{chat_id}", "0")
+            except Exception:
+                pass
+        return False
+
+
+async def post_new_trailer(bot, chat_id: int, message_thread_id: int | None = None) -> bool:
+    for _ in range(50):
+        trailer = generate_trailer()
+        if trailer is None:
+            continue
+        if await is_listing_posted(trailer["guid"]):
+            continue
+        result = await send_trailer(bot, chat_id, trailer, message_thread_id)
+        return result
+    return False
+
+
+async def force_post_trailer(bot, chat_id: int, message_thread_id: int | None = None) -> str:
+    trailer = generate_trailer()
+    vehicle_id = await create_trailer(
+        trailer["make"], trailer["model"], trailer["year"], trailer["price"],
+        trailer["miles"], trailer["description"], trailer["vin"], trailer["license_plate"],
+        trailer["color"], trailer["rarity"], chat_id,
+    )
+    caption = format_trailer_caption(trailer, vehicle_id)
+    try:
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
+        await bot.send_message(**send_args)
+
+        await mark_listing_posted(trailer["guid"])
+        return f"✅ #{vehicle_id} {trailer['year']} {trailer['make']} {trailer['model']}"
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
+
+
 async def auto_poster_loop(bot):
     logger.info("Auto-poster loop started (bot=%s)", type(bot).__name__)
     TICK = 15
@@ -1981,6 +2158,33 @@ async def auto_poster_loop(bot):
                             errors = 0
                         else:
                             logger.warning("House post failed for chat %s", chat_id)
+
+                # ── Trailers ──
+                trailer_enabled = await get_config(f"poster_trailers_enabled:{chat_id}")
+                if trailer_enabled == "1":
+                    t_interval_raw = await get_config(f"poster_trailers_interval:{chat_id}")
+                    t_interval = int(t_interval_raw) if t_interval_raw and t_interval_raw.isdigit() else 180
+                    t_target_raw = await get_config(f"poster_trailers_channel:{chat_id}")
+                    t_target = int(t_target_raw) if t_target_raw else chat_id
+                    t_topic_raw = await get_config(f"poster_trailers_topic:{chat_id}")
+                    t_topic = int(t_topic_raw) if t_topic_raw else None
+
+                    t_last_key = f"poster_trailers_last:{chat_id}"
+                    t_last_raw = await get_config(t_last_key)
+                    t_last_ts = float(t_last_raw) if t_last_raw else 0.0
+                    now = time.time()
+                    t_elapsed = now - t_last_ts
+                    t_needed = t_interval * 60
+
+                    if t_elapsed >= t_needed:
+                        logger.info("Posting trailer for chat %s (interval=%s min)", chat_id, t_interval)
+                        ok = await post_new_trailer(bot, t_target, t_topic)
+                        await set_config(t_last_key, str(now))
+                        if ok:
+                            errors = 0
+                        else:
+                            logger.warning("Trailer post failed for chat %s", chat_id)
+
             # ── Rent collection (every 4 ticks ≈ 1 min) ──
             if counter % 4 == 0:
                 try:
