@@ -443,6 +443,7 @@ GREENVILLE_CARS_PREMIUM = [
 ]
 
 MODEL_PRICE_OVERRIDES = {
+    ("Durant", "Voyager"): 68457,
     ("NVNAsport", "Acesera"): 3000000,
     ("NVNA", "Acesera"): 2800000,
     ("Pagani", "Zonda"): 2500000,
@@ -1724,7 +1725,8 @@ def generate_car(target_rarity: str | None = None) -> dict | None:
         miles = random.randint(1000, 250000)
         override = MODEL_PRICE_OVERRIDES.get((make, model))
         if override:
-            price = override + random.randint(-50000, 50000)
+            variance = max(1000, int(override * 0.05))
+            price = override + random.randint(-variance, variance)
         else:
             base_price = 5000 + (year - 1995) * 2000 if year >= 1995 else 5000
             price = int((base_price + random.randint(-4000, 8000)) * RARITY_MULTIPLIERS[rarity])
