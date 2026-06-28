@@ -2160,7 +2160,7 @@ async def get_available_houses_by_neighborhood(chat_id: int, neighborhood_id: in
         await conn.close()
 
 
-async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id: int, price: int, guid: str) -> int:
+async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id: int, price: int, guid: str, rent_price: int = 0) -> int:
     ht = await get_house_type(house_type_id)
     nb = await get_neighborhood(neighborhood_id)
     if not ht or not nb:
@@ -2170,20 +2170,20 @@ async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id
         loc = f"{nb['name']}, Greenville, WI"
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
+                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description, rent_price) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
                 chat_id, house_type_id, neighborhood_id, guid,
                 ht["type_name"], nb["name"], loc, price,
-                ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"],
+                ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"], rent_price,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description, rent_price) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (chat_id, house_type_id, neighborhood_id, guid,
                  ht["type_name"], nb["name"], loc, price,
-                 ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"]),
+                 ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"], rent_price),
             )
             await conn.commit()
             return cursor.lastrowid

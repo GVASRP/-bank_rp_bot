@@ -1375,6 +1375,7 @@ def generate_house() -> dict:
     price = int(base_price * mult * random.uniform(0.85, 1.15))
     price = max(10000, price // 1000 * 1000)
 
+    rent_price = max(100, int(price * random.uniform(0.005, 0.015)) // 100 * 100)
     features = random.sample(HOUSE_FEATURES, k=random.randint(2, 5))
     desc = f"{ht[1]}. {' • '.join(features)}. Состояние: {condition}."
 
@@ -1390,16 +1391,19 @@ def generate_house() -> dict:
         "sqft": ht[4],
         "description": desc,
         "price": price,
+        "rent_price": rent_price,
         "condition": condition,
         "guid": guid,
     }
 
 
 def format_house_caption(house: dict, house_id: int) -> str:
+    rent_line = f"🔑 ${house.get('rent_price', 0):,}/день в аренду\n" if house.get("rent_price", 0) > 0 else ""
     return (
         f"🏠 <b>{house['type_name']}</b>\n"
         f"📍 Район: <b>{house['neighborhood']}</b>\n"
         f"💰 ${house['price']:,}\n"
+        f"{rent_line}"
         f"🛏 {house['bedrooms']} спальни | 🛁 {house['bathrooms']} ванны | 📐 {house['sqft']:,} кв.футов\n"
         f"📝 {house['description']}\n"
         f"🆔 Лот: <b>#{house_id}</b>"
@@ -1412,7 +1416,7 @@ async def send_house(bot, chat_id: int, house: dict, message_thread_id: int | No
 
     house_id = await create_house_listing(
         chat_id, house["house_type_id"], house["neighborhood_id"],
-        house["price"], house["guid"],
+        house["price"], house["guid"], house.get("rent_price", 0),
     )
     caption = format_house_caption(house, house_id)
 
@@ -1446,7 +1450,7 @@ async def force_post_house(bot, chat_id: int, message_thread_id: int | None = No
     house = generate_house()
     house_id = await create_house_listing(
         chat_id, house["house_type_id"], house["neighborhood_id"],
-        house["price"], house["guid"],
+        house["price"], house["guid"], house.get("rent_price", 0),
     )
     caption = format_house_caption(house, house_id)
     try:
