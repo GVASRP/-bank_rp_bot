@@ -927,7 +927,7 @@ async def cmd_rent_out_car(message: Message):
     if rent_price < 50:
         await message.reply("❌ Минимальная цена аренды: $50/день")
         return
-    cars = await get_user_vehicles(message.from_user.id, message.chat.id)
+    cars = await get_user_vehicles(message.from_user.id)
     if position < 1 or position > len(cars):
         await message.reply(f"❌ У вас нет авто с номером {position}")
         return
@@ -957,7 +957,7 @@ async def cmd_unlist_car_rent(message: Message):
     except ValueError:
         await message.reply("❌ Номер должен быть числом")
         return
-    cars = await get_user_vehicles(message.from_user.id, message.chat.id)
+    cars = await get_user_vehicles(message.from_user.id)
     if position < 1 or position > len(cars):
         await message.reply(f"❌ У вас нет авто с номером {position}")
         return
