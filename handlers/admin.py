@@ -256,9 +256,9 @@ async def cmd_approve_deposit(message: Message):
     if not await ensure_admin(message):
         return
 
-    args = message.text.split(maxsplit=2)
+    args = message.text.split(maxsplit=3)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!одобрить_вклад id [процент]</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!одобрить_вклад id [процент] [дней]</code>", parse_mode="HTML")
         return
 
     try:
@@ -275,6 +275,16 @@ async def cmd_approve_deposit(message: Message):
                 interest = 5
         except ValueError:
             await message.reply("❌ Процент должен быть числом (например: 5)")
+            return
+
+    duration_days = 30
+    if len(args) >= 4:
+        try:
+            duration_days = int(args[3])
+            if duration_days < 1:
+                duration_days = 30
+        except ValueError:
+            await message.reply("❌ Срок должен быть числом (дни)")
             return
 
     request = await get_deposit_request(request_id)
@@ -295,13 +305,13 @@ async def cmd_approve_deposit(message: Message):
         return
 
     await update_deposit_request(request_id, "approved")
-    await create_deposit_account(request["user_telegram_id"], request["amount"], interest)
+    await create_deposit_account(request["user_telegram_id"], request["amount"], interest, duration_days)
     await update_balance(request["user_telegram_id"], -request["amount"], message.chat.id)
-    await add_transaction("deposit", request["user_telegram_id"], None, request["amount"], f"Вклад #{request_id} одобрен админом {message.from_user.full_name} ({interest}%)")
+    await add_transaction("deposit", request["user_telegram_id"], None, request["amount"], f"Вклад #{request_id} одобрен админом {message.from_user.full_name} ({interest}%, {duration_days}д)")
 
     await message.reply(
         f"✅ Вклад #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
-        f"Процент: <b>{interest}%</b>\n"
+        f"Процент: <b>{interest}%</b> | Срок: <b>{duration_days}</b> дней\n"
         f"Средства списаны со счёта пользователя.",
         parse_mode="HTML",
     )

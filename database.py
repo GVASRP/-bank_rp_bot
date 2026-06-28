@@ -89,6 +89,10 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE credits ADD COLUMN {col} INTEGER DEFAULT {default}")
             except Exception:
                 pass
+        try:
+            await conn.execute("ALTER TABLE deposits ADD COLUMN duration_days INTEGER DEFAULT 30")
+        except Exception:
+            pass
         for col, default in (("color", "''"), ("rarity", "'common'")):
             try:
                 await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col} TEXT DEFAULT {default}")
@@ -463,6 +467,12 @@ async def init_db():
                     await conn.commit()
                 except Exception:
                     pass
+            # Migration: add duration_days to deposits
+            try:
+                await conn.execute("ALTER TABLE deposits ADD COLUMN duration_days INTEGER DEFAULT 30")
+                await conn.commit()
+            except Exception:
+                pass
             # Seed house_types and neighborhoods
             try:
                 await seed_house_types()
@@ -884,19 +894,19 @@ async def repay_credit(credit_id: int, amount: int) -> bool:
         await conn.close()
 
 
-async def create_deposit_account(user_telegram_id: int, amount: int, interest_rate: int = 5) -> int:
+async def create_deposit_account(user_telegram_id: int, amount: int, interest_rate: int = 5, duration_days: int = 30) -> int:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO deposits (user_telegram_id, amount, interest_rate) VALUES ($1, $2, $3) RETURNING id",
-                user_telegram_id, amount, interest_rate,
+                "INSERT INTO deposits (user_telegram_id, amount, interest_rate, duration_days) VALUES ($1, $2, $3, $4) RETURNING id",
+                user_telegram_id, amount, interest_rate, duration_days,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO deposits (user_telegram_id, amount, interest_rate) VALUES (?, ?, ?)",
-                (user_telegram_id, amount, interest_rate),
+                "INSERT INTO deposits (user_telegram_id, amount, interest_rate, duration_days) VALUES (?, ?, ?, ?)",
+                (user_telegram_id, amount, interest_rate, duration_days),
             )
             await conn.commit()
             return cursor.lastrowid
@@ -2242,11 +2252,16 @@ HOUSE_TYPES = [
     (25, "Large 2-Story House", 3, 3.0, 2500, "Большой двухэтажный дом. 3 спальни, 3 ванны. v1.62.0."),
     (26, "2-Story Suburban House", 4, 3.0, 2300, "Двухэтажный пригородный дом. 4 спальни, 3 ванны. v1.62.0."),
     (27, "2-Story Farm-Style House", 3, 3.0, 2400, "Двухэтажный фермерский дом с лофтом над гостиной. 2015–наши дни."),
+    (28, "Studio Apartment", 1, 1.0, 400, "Микро-студия. Самое дешёвое жильё."),
+    (29, "Tiny House", 1, 1.0, 300, "Миниатюрный домик на колёсах."),
+    (30, "Cabin", 2, 1.0, 700, "Небольшая деревенская хижина."),
+    (31, "Small Ranch House", 2, 1.5, 1000, "Маленький ранчо с участком."),
 ]
 
 HOUSE_PRICES = [65000, 145000, 120000, 165000, 110000, 200000, 350000, 195000, 480000,
                 150000, 135000, 250000, 155000, 380000, 210000, 175000, 40000, 185000,
-                170000, 195000, 160000, 165000, 190000, 180000, 230000, 200000, 220000]
+                170000, 195000, 160000, 165000, 190000, 180000, 230000, 200000, 220000,
+                20000, 25000, 30000, 35000]
 
 NEIGHBORHOODS = ["Six Housen't", "Lakeville", "Greenhills", "Horton", "Farm Area", "Greenville Lake", "Fleetwood Lane"]
 
@@ -2258,32 +2273,28 @@ HOUSE_TYPE_NEIGHBORHOODS = {
     14: [3], 15: [1], 16: [2, 3], 17: [0], 18: [2],
     19: [1, 2], 20: [2], 21: [1], 22: [0], 23: [2],
     24: [0], 25: [3], 26: [2], 27: [4],
+    28: [0], 29: [0], 30: [4], 31: [4],
 }
 
 
 async def seed_house_types() -> None:
     conn = await get_conn()
     try:
-        if _is_pg:
-            existing = await conn.fetchval("SELECT COUNT(*) FROM house_types")
-        else:
-            cursor = await conn.execute("SELECT COUNT(*) FROM house_types")
-            row = await cursor.fetchone()
-            existing = row[0] if row else 0
-        if existing:
-            return
         for ht in HOUSE_TYPES:
             hid, name, beds, baths, sqft, desc = ht
             if _is_pg:
                 await conn.execute(
-                    "INSERT INTO house_types (id, type_name, bedrooms, bathrooms, sqft, description) VALUES ($1,$2,$3,$4,$5,$6)",
+                    "INSERT INTO house_types (id, type_name, bedrooms, bathrooms, sqft, description) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING",
                     hid, name, beds, baths, sqft, desc,
                 )
             else:
-                await conn.execute(
-                    "INSERT INTO house_types (id, type_name, bedrooms, bathrooms, sqft, description) VALUES (?,?,?,?,?,?)",
-                    (hid, name, beds, baths, sqft, desc),
-                )
+                try:
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO house_types (id, type_name, bedrooms, bathrooms, sqft, description) VALUES (?,?,?,?,?,?)",
+                        (hid, name, beds, baths, sqft, desc),
+                    )
+                except Exception:
+                    pass
         if not _is_pg:
             await conn.commit()
     finally:

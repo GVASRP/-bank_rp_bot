@@ -1151,8 +1151,8 @@ WORK_VEHICLES = [
     ('Sentinel', 'Adventurer Limo'),
 ]
 
-RARITY_WEIGHTS = {"common": 60, "damaged": 8, "rare": 20, "legendary": 12}
-RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 1.6, "legendary": 2.5}
+RARITY_WEIGHTS = {"common": 65, "damaged": 8, "rare": 18, "legendary": 9}
+RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 1.3, "legendary": 2.0}
 RARITY_NAMES = {"common": "", "damaged": "💥 Битый", "rare": "⭐ Редкий", "legendary": "🔥🔥🔥 МЕГА-КАР 🔥🔥🔥"}
 CAR_YEARS = {
     ('Acadia', 'Syzygy'): {2020},
@@ -1540,7 +1540,7 @@ CAR_YEARS = {
     ('Zephyr', 'Vicieux'): {2015},
 }
 
-RARITY_YEARS = {"common": (1940, 2026), "damaged": (1940, 2026), "rare": (1940, 2026), "legendary": (1940, 2026)}
+RARITY_YEARS = {"common": (1995, 2026), "damaged": (1995, 2026), "rare": (2005, 2026), "legendary": (2015, 2026)}
 
 # ── Trailers ───────────────────────────────────────────────
 
@@ -1688,7 +1688,7 @@ def generate_car(target_rarity: str | None = None) -> dict | None:
         else:
             pool = COMMON_CARS
 
-        if rarity != "damaged" and random.random() < 0.10:
+        if rarity != "damaged" and random.random() < 0.05:
             make, model = random.choice(LICENSED_CARS)
         elif rarity in ("common", "damaged") and random.random() < 0.18:
             make, model = random.choice(WORK_VEHICLES)
@@ -1820,7 +1820,7 @@ async def post_new_car(bot, chat_id: int, message_thread_id: int | None = None) 
             continue
         if await is_listing_posted(car["guid"]):
             continue
-        if await is_model_recently_posted(car["make"], car["model"]):
+        if await is_model_recently_posted(car["make"], car["model"], hours=72):
             continue
         result = await send_car(bot, chat_id, car, message_thread_id)
         if result:
@@ -1858,7 +1858,8 @@ async def force_post_one(bot, chat_id: int, message_thread_id: int | None = None
 
 HOUSE_PRICES_BASE = [65000, 145000, 120000, 165000, 110000, 200000, 350000, 195000, 480000,
                      150000, 135000, 250000, 155000, 380000, 210000, 175000, 40000, 185000,
-                     170000, 195000, 160000, 165000, 190000, 180000, 230000, 200000, 220000]
+                     170000, 195000, 160000, 165000, 190000, 180000, 230000, 200000, 220000,
+                     20000, 25000, 30000, 35000]
 
 HOUSE_FEATURES = [
     "камин", "бассейн", "гараж на 2 машины", "патио", "новая кухня",
@@ -1882,8 +1883,9 @@ HOUSE_PRICE_VARIANTS = {
 def generate_house() -> dict:
     # Weighted: cheaper houses appear more often than mansions
     _weights = [5, 3, 3, 3, 3, 2, 1, 3, 1, 3, 3, 2, 3,
-                1, 2, 3, 5, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2]
-    ht_id = random.choices(range(1, 28), weights=_weights)[0]
+                1, 2, 3, 5, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2,
+                6, 6, 5, 4]
+    ht_id = random.choices(range(1, 32), weights=_weights)[0]
     ht = None
     for h in [
         (1, "Mobile Home", 3, 2.5, 900, "Самый бюджетный вариант."),
@@ -1913,6 +1915,10 @@ def generate_house() -> dict:
         (25, "Large 2-Story House", 3, 3.0, 2500, "Большой двухэтажный дом."),
         (26, "2-Story Suburban House", 4, 3.0, 2300, "Двухэтажный пригородный дом."),
         (27, "2-Story Farm-Style House", 3, 3.0, 2400, "Двухэтажный фермерский дом."),
+        (28, "Studio Apartment", 1, 1.0, 400, "Микро-студия. Самое дешёвое жильё."),
+        (29, "Tiny House", 1, 1.0, 300, "Миниатюрный домик на колёсах."),
+        (30, "Cabin", 2, 1.0, 700, "Небольшая деревенская хижина."),
+        (31, "Small Ranch House", 2, 1.5, 1000, "Маленький ранчо с участком."),
     ]:
         if h[0] == ht_id:
             ht = h
@@ -1985,7 +1991,7 @@ async def send_house(bot, chat_id: int, house: dict, message_thread_id: int | No
         logger.error("House send error: %s", e)
         if "chat not found" in str(e).lower():
             try:
-                await set_config(f"poster_enabled:{chat_id}", "0")
+                await set_config(f"poster_houses_enabled:{chat_id}", "0")
             except Exception:
                 pass
         return False
