@@ -160,7 +160,7 @@ async def cmd_my_job(message: Message):
     if job["name"] in DELIVERY_JOBS:
         extras.append("\n🚛 <code>!доставка</code> — совершить доставку")
     if job["name"] in ("Таксист", "Водитель автобуса"):
-        extras.append("\n🏆 Премию выдаёт админ за заказы/маршруты")
+        extras.append("\n🏆 Премию выдаёт админ за заказы/остановки")
     extra = "".join(extras)
     await message.reply(
         f"💼 <b>Ваша профессия:</b> {job['name']}\n"
@@ -377,7 +377,7 @@ async def cmd_delivery(message: Message):
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
-BONUS_RATES = {"такси": 80, "автобус": 150}
+BONUS_RATES = {"такси": 80, "автобус": 12}
 
 
 @router.message(Command("премия", prefix="!/"))
@@ -412,7 +412,7 @@ async def cmd_bonus(message: Message):
     await add_transaction("bonus", None, target_id, total,
                           f"Премия: {count} {job_type} ({rate}$ x {count})")
 
-    type_label = "заказов" if job_type == "такси" else "маршрутов"
+    type_label = "заказов" if job_type == "такси" else "остановок"
     await message.reply(
         f"✅ <b>Премия выдана</b>\n"
         f"👤 {target_name}\n"
