@@ -222,7 +222,7 @@ async def init_db():
                 name TEXT NOT NULL
             )
         """)
-        for col in (("house_type_id", "INTEGER"), ("neighborhood_id", "INTEGER"), ("guid", "TEXT")):
+        for col in (("chat_id", "BIGINT DEFAULT 0"), ("house_type_id", "INTEGER"), ("neighborhood_id", "INTEGER"), ("guid", "TEXT")):
             try:
                 await conn.execute(f"ALTER TABLE houses ADD COLUMN {col[0]} {col[1]}")
             except Exception:
@@ -441,8 +441,8 @@ async def init_db():
                 await conn.commit()
             except Exception:
                 pass
-            # Migration: add house_type_id, neighborhood_id, guid to houses
-            for col in ("house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT"):
+            # Migration: add chat_id, house_type_id, neighborhood_id, guid to houses
+            for col in ("chat_id INTEGER DEFAULT 0", "house_type_id INTEGER", "neighborhood_id INTEGER", "guid TEXT"):
                 try:
                     await conn.execute(f"ALTER TABLE houses ADD COLUMN {col}")
                     await conn.commit()
