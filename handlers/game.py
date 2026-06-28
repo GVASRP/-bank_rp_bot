@@ -343,11 +343,17 @@ async def cmd_container(message: Message):
         )
         return
 
-    for _ in range(100):
+    for _ in range(200):
         car = generate_car()
-        if car["rarity"] == "legendary" and random.random() < 0.92:
+        if car["rarity"] == "damaged":
             continue
-        if car["rarity"] == "rare" and random.random() < 0.60:
+        if car["price"] < CONTAINER_PRICE * 0.8:
+            continue
+        if car["rarity"] == "legendary" and random.random() < 0.70:
+            continue
+        if car["rarity"] == "rare" and random.random() < 0.30:
+            continue
+        if car["rarity"] == "common" and random.random() < 0.20:
             continue
         break
     vehicle_id = await create_vehicle(

@@ -2044,7 +2044,7 @@ def generate_car(target_rarity: str | None = None) -> dict | None:
         override = MODEL_PRICE_OVERRIDES.get((make, model))
         if override:
             variance = max(1000, int(override * 0.05))
-            price = override + random.randint(-variance, variance)
+            price = int((override + random.randint(-variance, variance)) * RARITY_MULTIPLIERS[rarity])
         else:
             pool = CAR_POOL.get((make, model), "mid")
             pool_base = POOL_BASE_PRICE[pool]
