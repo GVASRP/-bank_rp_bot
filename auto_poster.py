@@ -1170,7 +1170,31 @@ WORK_VEHICLES = [
 ]
 
 RARITY_WEIGHTS = {"common": 65, "damaged": 8, "rare": 18, "legendary": 9}
-RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.25, "rare": 8.0, "legendary": 55.0}
+RARITY_MULTIPLIERS = {"common": 1.0, "damaged": 0.3, "rare": 1.5, "legendary": 1.0}
+
+CAR_POOL = {}
+for _c in GREENVILLE_CARS_BUDGET:
+    CAR_POOL[_c] = "budget"
+for _c in GREENVILLE_CARS_MID:
+    CAR_POOL[_c] = "mid"
+for _c in GREENVILLE_CARS_PREMIUM:
+    CAR_POOL[_c] = "premium"
+for _c in GREENVILLE_CARS_LEGENDARY:
+    CAR_POOL[_c] = "legendary"
+for _c in WORK_VEHICLES:
+    CAR_POOL[_c] = "work"
+for _c in LICENSED_CARS:
+    CAR_POOL[_c] = "licensed"
+
+POOL_BASE_PRICE = {
+    "budget": 5000,
+    "mid": 25000,
+    "premium": 80000,
+    "legendary": 2000000,
+    "work": 35000,
+    "licensed": 60000,
+}
+
 RARITY_NAMES = {"common": "", "damaged": "💥 Битый", "rare": "⭐ Редкий", "legendary": "🔥🔥🔥 МЕГА-КАР 🔥🔥🔥"}
 CAR_YEARS = {
     ('Acadia', 'Syzygy'): {2020},
@@ -1728,8 +1752,12 @@ def generate_car(target_rarity: str | None = None) -> dict | None:
             variance = max(1000, int(override * 0.05))
             price = override + random.randint(-variance, variance)
         else:
-            base_price = 5000 + (year - 1995) * 2000 if year >= 1995 else 5000
-            price = int((base_price + random.randint(-4000, 8000)) * RARITY_MULTIPLIERS[rarity])
+            pool = CAR_POOL.get((make, model), "mid")
+            pool_base = POOL_BASE_PRICE[pool]
+            year_factor = max(0.5, 1.0 + (year - 2000) * 0.02)
+            base = int(pool_base * year_factor)
+            variance = max(1000, int(base * 0.15))
+            price = int((base + random.randint(-variance, variance)) * RARITY_MULTIPLIERS[rarity])
         price = max(100, min(price, 5000000))
         city = random.choice(WI_CITIES_RU)
         color = random.choice(COLORS)
