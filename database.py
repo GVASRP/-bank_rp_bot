@@ -118,6 +118,14 @@ async def init_db():
                 await conn.execute(f"ALTER TABLE vehicles ADD COLUMN {col[0]} {col[1]}")
             except Exception:
                 pass
+        try:
+            await seed_house_types()
+        except Exception:
+            pass
+        try:
+            await seed_neighborhoods()
+        except Exception:
+            pass
         # Remove old UNIQUE on telegram_id, add composite UNIQUE for per-group balances
         for cname in ["users_telegram_id_key", "uq_users_telegram_id"]:
             try:
