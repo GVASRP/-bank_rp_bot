@@ -1627,8 +1627,6 @@ def generate_trailer(target_rarity: str | None = None) -> dict:
 
         vin = "TR" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=15))
         license_plate = f"TRL-{random.randint(100, 999)}"
-        color = random.choice(COLORS)
-
         return {
             "make": TRAILER_BRAND,
             "model": model,
@@ -1638,7 +1636,7 @@ def generate_trailer(target_rarity: str | None = None) -> dict:
             "description": full_desc,
             "vin": vin,
             "license_plate": license_plate,
-            "color": color,
+            "color": "",
             "rarity": rarity,
             "guid": f"trl_{rarity}_{vin}",
         }
@@ -1651,7 +1649,6 @@ def format_trailer_caption(trailer: dict, vehicle_id: int) -> str:
         f"🚛 <b>{trailer['year']} {trailer['make']} {trailer['model']}</b>\n"
         f"📍 Truck Planet, Greenville, WI\n"
         f"💰 ${trailer['price']:,} | {trailer['miles']:,} миль\n"
-        f"🎨 {trailer['color']}\n"
         f"🆔 Лот: <b>#{vehicle_id}</b>{rarity_line}"
     )
 

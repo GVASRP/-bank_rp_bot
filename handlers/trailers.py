@@ -148,7 +148,6 @@ async def cmd_trailer_info(message: Message):
         f"🚛 <b>{v['year']} {v['make']} {v['model']}</b>\n"
         f"📄 {v.get('city', v.get('description', ''))}\n"
         f"💰 ${v['price']:,} | {v.get('miles', 0):,} миль\n"
-        f"🎨 {v.get('color', '-')}\n"
         f"🆔 ID: <b>#{v['id']}</b>{rarity_line}",
         parse_mode="HTML",
     )
