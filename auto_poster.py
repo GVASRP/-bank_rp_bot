@@ -1131,7 +1131,7 @@ WORK_VEHICLES = [
     ('Falcon', 'Global Ambulance'),
     ('Falcon', 'Advance DOT'),
     ('Falcon', 'Advance Fire Rescue'),
-    ('Falcon', 'Advance Plow DOT Plow'),
+    ('Bandit', 'Advance Plow DOT Plow'),
     ('Falcon', 'Departure Security'),
     ('Falcon', 'Prime Fire Rescue'),
     ('Falcon', 'Scavenger Fire Rescue'),
