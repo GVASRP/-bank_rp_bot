@@ -2461,7 +2461,7 @@ async def get_available_houses_by_neighborhood(chat_id: int, neighborhood_id: in
         await conn.close()
 
 
-async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id: int, price: int, guid: str, rent_price: int = 0) -> int:
+async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id: int, price: int, guid: str, rent_price: int = 0, photo_url: str = "", owner_id: int | None = None, desc_override: str = "") -> int:
     ht = await get_house_type(house_type_id)
     nb = await get_neighborhood(neighborhood_id)
     if not ht or not nb:
@@ -2469,22 +2469,26 @@ async def create_house_listing(chat_id: int, house_type_id: int, neighborhood_id
     conn = await get_conn()
     try:
         loc = f"{nb['name']}, Greenville, WI"
+        desc = desc_override or ht["description"]
+        status = "sold" if owner_id else "available"
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description, rent_price) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
+                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description, rent_price, photo_url, owner_telegram_id, status) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id",
                 chat_id, house_type_id, neighborhood_id, guid,
                 ht["type_name"], nb["name"], loc, price,
-                ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"], rent_price,
+                ht["bedrooms"], ht["bathrooms"], ht["sqft"], desc, rent_price,
+                photo_url, owner_id, status,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description, rent_price) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO houses (chat_id, house_type_id, neighborhood_id, guid, type_name, neighborhood, location, price, bedrooms, bathrooms, sqft, description, rent_price, photo_url, owner_telegram_id, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (chat_id, house_type_id, neighborhood_id, guid,
                  ht["type_name"], nb["name"], loc, price,
-                 ht["bedrooms"], ht["bathrooms"], ht["sqft"], ht["description"], rent_price),
+                 ht["bedrooms"], ht["bathrooms"], ht["sqft"], desc, rent_price,
+                 photo_url, owner_id, status),
             )
             await conn.commit()
             return cursor.lastrowid
@@ -3526,14 +3530,14 @@ async def get_org_members(org_id: int) -> list:
     try:
         if _is_pg:
             rows = await conn.fetch(
-                "SELECT m.*, COALESCE(u.username, u.first_name, '') as name "
+                "SELECT DISTINCT m.*, COALESCE(u.username, u.first_name, '') as name "
                 "FROM org_members m LEFT JOIN users u ON m.telegram_id = u.telegram_id "
                 "WHERE m.org_id = $1",
                 org_id,
             )
         else:
             cursor = await conn.execute(
-                "SELECT m.*, COALESCE(u.username, u.first_name, '') as name "
+                "SELECT DISTINCT m.*, COALESCE(u.username, u.first_name, '') as name "
                 "FROM org_members m LEFT JOIN users u ON m.telegram_id = u.telegram_id "
                 "WHERE m.org_id = ?",
                 (org_id,),
@@ -3578,6 +3582,48 @@ async def is_org_owner(org_id: int, telegram_id: int) -> bool:
             )
             row = cursor.fetchone()
         return row is not None
+    finally:
+        await conn.close()
+
+
+async def delete_org(org_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute("DELETE FROM org_members WHERE org_id = $1", org_id)
+            result = await conn.execute("DELETE FROM organizations WHERE id = $1", org_id)
+            return "DELETE 1" in (result or "")
+        else:
+            await conn.execute("DELETE FROM org_members WHERE org_id = ?", (org_id,))
+            cursor = await conn.execute("DELETE FROM organizations WHERE id = ?", (org_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def transfer_asset(item_type: str, item_id: int, new_owner_id: int | None = None, new_org_id: int | None = None) -> bool:
+    conn = await get_conn()
+    try:
+        if item_type == "vehicle":
+            table = "vehicles"
+        elif item_type == "house":
+            table = "houses"
+        else:
+            return False
+        if _is_pg:
+            result = await conn.execute(
+                f"UPDATE {table} SET owner_telegram_id = $1, org_id = $2 WHERE id = $3",
+                new_owner_id, new_org_id, item_id,
+            )
+            return "UPDATE 1" in (result or "")
+        else:
+            cursor = await conn.execute(
+                f"UPDATE {table} SET owner_telegram_id = ?, org_id = ? WHERE id = ?",
+                (new_owner_id, new_org_id, item_id),
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
     finally:
         await conn.close()
 

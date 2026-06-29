@@ -17,6 +17,7 @@ from database import (
     get_org_vehicles,
     get_org_houses,
     get_org_trailers,
+    delete_org,
 )
 from utils import format_amount, parse_amount, resolve_target
 
@@ -290,6 +291,43 @@ async def cmd_org_remove_member(message: Message):
         f"✅ {target_name} удалён из организации <b>{org['name']}</b>",
         parse_mode="HTML",
     )
+
+
+@router.message(Command("удалить_орг", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_delete_org(message: Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!удалить_орг ID</code>", parse_mode="HTML")
+        return
+    try:
+        org_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    org = await get_org(org_id)
+    if not org:
+        await message.reply("❌ Организация не найдена")
+        return
+    if not await is_org_owner(org_id, message.from_user.id):
+        await message.reply("❌ Только владелец может удалить организацию")
+        return
+    vehicles = await get_org_vehicles(org_id)
+    houses = await get_org_trailers(org_id)
+    trailers = await get_org_trailers(org_id)
+    total = len(vehicles) + len(houses) + len(trailers)
+    if total > 0:
+        await message.reply(
+            f"❌ У организации {total} объектов имущества. Сначала продайте или передайте всё.",
+            parse_mode="HTML",
+        )
+        return
+    if org["balance"] > 0:
+        await message.reply("❌ На балансе организации есть средства. Сначала выведите их.", parse_mode="HTML")
+        return
+    if not await delete_org(org_id):
+        await message.reply("❌ Ошибка удаления организации")
+        return
+    await message.reply(f"✅ Организация <b>{org['name']}</b> удалена", parse_mode="HTML")
 
 
 @router.message(Command("орг_авто", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))

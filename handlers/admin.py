@@ -740,6 +740,66 @@ async def cmd_add_house(message: Message):
     )
 
 
+@router.message(Command("добавить_жилье", prefix="!/"))
+async def cmd_add_gov_housing(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    photo_file_id = ""
+    if message.photo:
+        photo_file_id = message.photo[-1].file_id
+    elif message.reply_to_message and message.reply_to_message.photo:
+        photo_file_id = message.reply_to_message.photo[-1].file_id
+
+    parts = message.text.split(maxsplit=5)
+    if len(parts) < 5:
+        hts = await get_all_house_types()
+        nbs = await get_all_neighborhoods()
+        ht_lines = [f"#{ht['id']} — {ht['type_name']} ({ht['bedrooms']}br, {ht['sqft']}sqft)" for ht in hts]
+        nb_lines = [f"#{nb['id']} — {nb['name']}" for nb in nbs]
+        await message.reply(
+            "❌ Использование: <code>!добавить_жилье ID_ТИПА ID_РАЙОНА цена @user [описание]</code>\n"
+            "📸 Прикрепите фото или ответьте на фото\n\n"
+            "📋 <b>Типы домов:</b>\n" + "\n".join(ht_lines) +
+            "\n\n🗺 <b>Районы:</b>\n" + "\n".join(nb_lines),
+            parse_mode="HTML",
+        )
+        return
+    try:
+        ht_id = int(parts[1])
+        nb_id = int(parts[2])
+        price = int(parts[3])
+    except ValueError:
+        await message.reply("❌ ID типа, ID района и цена должны быть числами")
+        return
+    ht = await get_house_type(ht_id)
+    nb = await get_neighborhood(nb_id)
+    if not ht or not nb:
+        await message.reply("❌ Тип дома или район не найдены")
+        return
+
+    uid, target_name, target_username, _ = await resolve_target(message, [parts[0]] + parts[4:])
+    if not uid:
+        await message.reply("❌ Укажите пользователя (@username), которому выдаётся жильё")
+        return
+
+    desc = parts[5] if len(parts) >= 6 else (ht.get("description") or "")
+    import random
+    guid = f"gov_{ht_id}_{nb_id}_{random.randint(100000,999999)}"
+    hid = await create_house_listing(
+        message.chat.id, ht_id, nb_id, price, guid,
+        photo_url=photo_file_id, owner_id=uid, desc_override=desc,
+    )
+    await message.reply(
+        f"✅ <b>Гос. жильё выдано!</b>\n"
+        f"🏠 #{hid} {ht['type_name']}\n"
+        f"📍 <b>{nb['name']}</b>\n"
+        f"💰 ${price:,} | 🛏 {ht['bedrooms']} | 🛁 {ht['bathrooms']} | 📐 {ht['sqft']} кв.футов\n"
+        f"👤 Жилец: {target_name}",
+        parse_mode="HTML",
+    )
+
+
 @router.message(Command("удалить_дом", prefix="!/"))
 async def cmd_delete_house(message: Message):
     if not await ensure_admin(message):

@@ -24,6 +24,7 @@ from database import (
     refund_org,
     get_org,
     is_org_member,
+    transfer_asset,
     seed_houses,
     get_house,
     get_available_houses,
@@ -74,7 +75,7 @@ async def cmd_vehicles(message: Message):
     idx = 1
     if market:
         lines.append(f"🏪 <b>Автосалон ({len(market)} шт.):</b>")
-        for v in market[:15]:
+        for v in market:
             lines.append(
                 f"#{idx} — {v['year']} {v['make']} {v['model']}\n"
                 f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
@@ -83,7 +84,7 @@ async def cmd_vehicles(message: Message):
         lines.append("")
     if player:
         lines.append(f"🤝 <b>Б/У от игроков ({len(player)} шт.):</b>")
-        for v in player[:10]:
+        for v in player:
             seller = await get_user_by_telegram_id(v["owner_telegram_id"])
             seller_name = get_user_display(seller) if seller else "Неизвестно"
             lines.append(
@@ -1181,3 +1182,75 @@ async def cmd_rental_cars(message: Message):
         )
     lines.append("\n🔑 <code>!арендовать_авто НОМЕР</code> — арендовать")
     await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("передать", prefix="!/"))
+async def cmd_transfer(message: Message):
+    args = message.text.strip().split(maxsplit=3)
+    if len(args) < 3:
+        await message.reply("❌ Использование: <code>!передать ID @user</code> или <code>!передать ID орг ID</code>\n"
+                           "ID — номер авто или дома из <code>!мои_авто</code> / <code>!мои_дома</code>",
+                           parse_mode="HTML")
+        return
+
+    try:
+        pos = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+
+    # Check if target is an org
+    target_org_id = None
+    new_owner_id = None
+    target_name = ""
+
+    if args[2].lower() in ("орг", "org"):
+        if len(args) < 4:
+            await message.reply("❌ Укажите ID организации: <code>!передать ID орг ID</code>", parse_mode="HTML")
+            return
+        try:
+            target_org_id = int(args[3])
+        except ValueError:
+            await message.reply("❌ ID организации должен быть числом")
+            return
+        if not await is_org_member(target_org_id, message.from_user.id):
+            await message.reply("❌ Вы не участник организации-получателя")
+            return
+        org = await get_org(target_org_id)
+        target_name = f"организация {org['name']}" if org else f"орг.#{target_org_id}"
+        new_owner_id = message.from_user.id
+    else:
+        tid, tname, tuname, _ = await resolve_target(message, args)
+        if not tid:
+            await message.reply("❌ Пользователь не найден")
+            return
+        new_owner_id = tid
+        target_name = tname
+
+    # Find the asset — try vehicles first, then houses
+    vehicles = await get_user_vehicles(message.from_user.id)
+    asset = None
+    asset_type = ""
+    if 1 <= pos <= len(vehicles):
+        asset = vehicles[pos - 1]
+        asset_type = "vehicle"
+    else:
+        houses = await get_user_houses(message.from_user.id, message.chat.id)
+        if 1 <= pos <= len(houses):
+            asset = houses[pos - 1]
+            asset_type = "house"
+    if not asset:
+        await message.reply(f"❌ Авто или дом #{pos} не найден")
+        return
+
+    asset_name = f"{asset.get('year', '')} {asset.get('make', '')} {asset.get('model', '')} {asset.get('type_name', '')}".strip()
+
+    ok = await transfer_asset(asset_type, asset["id"], new_owner_id, target_org_id)
+    if not ok:
+        await message.reply("❌ Ошибка передачи")
+        return
+
+    await message.reply(
+        f"✅ <b>{asset_name}</b> передан {target_name}",
+        parse_mode="HTML",
+    )
