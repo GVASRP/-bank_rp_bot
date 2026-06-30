@@ -39,6 +39,9 @@ from database import (
     get_all_house_types,
     get_all_neighborhoods,
     create_house_listing,
+    get_vehicle,
+    buy_vehicle,
+    get_available_vehicles,
 )
 from auto_poster import force_post_one, force_post_house, force_post_trailer
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
@@ -202,19 +205,37 @@ async def cmd_approve_credit(message: Message):
         return
 
     try:
-        credit_id = await create_credit(request["user_telegram_id"], request["amount"], interest, duration_days)
-        await update_balance(request["user_telegram_id"], request["amount"], message.chat.id)
+        vehicle_id = request.get("vehicle_id", 0) or 0
+        credit_id = await create_credit(request["user_telegram_id"], request["amount"], interest, duration_days, vehicle_id)
         await add_transaction("credit", None, request["user_telegram_id"], request["amount"], f"Кредит #{request_id} одобрен админом {message.from_user.full_name} ({interest}%, {duration_days}д)")
+
+        if vehicle_id:
+            market = await get_available_vehicles(chat_id=message.chat.id)
+            v = next((x for x in market if x.get("id") == vehicle_id or x.get("pos") == vehicle_id), None)
+            if v:
+                vid = await buy_vehicle(
+                    request["user_telegram_id"], v["make"], v["model"], v["year"],
+                    v["price"], v["miles"], v["city"], v["vin"], v["license_plate"],
+                    v["color"], v["rarity"], message.chat.id,
+                )
+                await add_transaction("buy_car", request["user_telegram_id"], None, v["price"],
+                    f"Автокредит #{credit_id}: {v['year']} {v['make']} {v['model']} #{vid}")
+            else:
+                await update_balance(request["user_telegram_id"], request["amount"], message.chat.id)
+        else:
+            await update_balance(request["user_telegram_id"], request["amount"], message.chat.id)
+
         await update_credit_request(request_id, "approved")
     except Exception as e:
         await message.reply(f"❌ Ошибка при одобрении кредита: {e}")
         return
 
+    extra = "🚗 Авто куплено в кредит!\n" if vehicle_id else "Средства зачислены пользователю.\n"
     await message.reply(
         f"✅ Кредит #{request_id} на <b>{format_amount(request['amount'])}</b> долларов одобрен!\n"
         f"Ставка: <b>{interest}%</b> годовых | Срок: <b>{duration_days}</b> дней\n"
         f"Проценты начисляются ежедневно на остаток тела кредита.\n"
-        f"Средства зачислены пользователю.",
+        f"{extra}",
         parse_mode="HTML",
     )
 
@@ -368,7 +389,8 @@ async def cmd_list_requests(message: Message):
         for c in credits:
             user = await get_user_by_telegram_id(c["user_telegram_id"], message.chat.id)
             name = get_user_display(user, f"ID {c['user_telegram_id']}")
-            lines.append(f"  #{c['id']} — {name}: {format_amount(c['amount'])} долларов")
+            tag = "🚗 Авто" if (c.get("vehicle_id") or 0) else "💳 Обычный"
+            lines.append(f"  #{c['id']} — {name}: {format_amount(c['amount'])} долларов ({tag})")
         lines.append("")
 
     if deposits:

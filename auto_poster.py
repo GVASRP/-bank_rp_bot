@@ -2133,8 +2133,8 @@ async def send_car(bot, chat_id: int, car: dict, message_thread_id: int | None =
         return True
     except Exception as e:
         logger.error("Send error: %s", e)
-        if "chat not found" in str(e).lower():
-            logger.warning("Chat %s not found — disabling poster for this chat", chat_id)
+        if "chat not found" in str(e).lower() or "forbidden" in str(e).lower():
+            logger.warning("Chat %s not found or forbidden — disabling poster for this chat", chat_id)
             try:
                 await set_config(f"poster_enabled:{chat_id}", "0")
             except Exception:
@@ -2448,10 +2448,12 @@ async def auto_poster_loop(bot):
 
             for cid_str in chat_ids:
                 chat_id = int(cid_str)
+                now = time.time()
 
                 # ── Cars ──
                 car_enabled = await get_config(f"poster_enabled:{chat_id}")
-                if car_enabled == "1":
+                car_skip_until = await get_config(f"poster_skip_cars:{chat_id}")
+                if car_enabled == "1" and (not car_skip_until or now > float(car_skip_until)):
                     interval_raw = await get_config(f"poster_interval:{chat_id}")
                     interval_min = int(interval_raw) if interval_raw and interval_raw.isdigit() else 120
                     target_raw = await get_config(f"poster_cars_channel:{chat_id}")
@@ -2462,7 +2464,6 @@ async def auto_poster_loop(bot):
                     last_key = f"poster_last_post:{chat_id}"
                     last_raw = await get_config(last_key)
                     last_ts = float(last_raw) if last_raw else 0.0
-                    now = time.time()
                     elapsed = now - last_ts
                     needed = interval_min * 60
 
@@ -2472,12 +2473,15 @@ async def auto_poster_loop(bot):
                         await set_config(last_key, str(now))
                         if ok:
                             errors = 0
+                            await set_config(f"poster_skip_cars:{chat_id}", "")
                         else:
                             logger.warning("Car post failed for chat %s", chat_id)
+                            await set_config(f"poster_skip_cars:{chat_id}", str(now + 3600))
 
                 # ── Houses ──
                 house_enabled = await get_config(f"poster_houses_enabled:{chat_id}")
-                if house_enabled == "1":
+                house_skip_until = await get_config(f"poster_skip_houses:{chat_id}")
+                if house_enabled == "1" and (not house_skip_until or now > float(house_skip_until)):
                     h_interval_raw = await get_config(f"poster_houses_interval:{chat_id}")
                     h_interval = int(h_interval_raw) if h_interval_raw and h_interval_raw.isdigit() else 180
                     h_target_raw = await get_config(f"poster_houses_channel:{chat_id}")
@@ -2488,7 +2492,6 @@ async def auto_poster_loop(bot):
                     h_last_key = f"poster_houses_last:{chat_id}"
                     h_last_raw = await get_config(h_last_key)
                     h_last_ts = float(h_last_raw) if h_last_raw else 0.0
-                    now = time.time()
                     h_elapsed = now - h_last_ts
                     h_needed = h_interval * 60
 
@@ -2498,12 +2501,15 @@ async def auto_poster_loop(bot):
                         await set_config(h_last_key, str(now))
                         if ok:
                             errors = 0
+                            await set_config(f"poster_skip_houses:{chat_id}", "")
                         else:
                             logger.warning("House post failed for chat %s", chat_id)
+                            await set_config(f"poster_skip_houses:{chat_id}", str(now + 3600))
 
                 # ── Trailers ──
                 trailer_enabled = await get_config(f"poster_trailers_enabled:{chat_id}")
-                if trailer_enabled == "1":
+                trailer_skip_until = await get_config(f"poster_skip_trailers:{chat_id}")
+                if trailer_enabled == "1" and (not trailer_skip_until or now > float(trailer_skip_until)):
                     t_interval_raw = await get_config(f"poster_trailers_interval:{chat_id}")
                     t_interval = int(t_interval_raw) if t_interval_raw and t_interval_raw.isdigit() else 180
                     t_target_raw = await get_config(f"poster_trailers_channel:{chat_id}")
@@ -2514,7 +2520,6 @@ async def auto_poster_loop(bot):
                     t_last_key = f"poster_trailers_last:{chat_id}"
                     t_last_raw = await get_config(t_last_key)
                     t_last_ts = float(t_last_raw) if t_last_raw else 0.0
-                    now = time.time()
                     t_elapsed = now - t_last_ts
                     t_needed = t_interval * 60
 
@@ -2524,8 +2529,10 @@ async def auto_poster_loop(bot):
                         await set_config(t_last_key, str(now))
                         if ok:
                             errors = 0
+                            await set_config(f"poster_skip_trailers:{chat_id}", "")
                         else:
                             logger.warning("Trailer post failed for chat %s", chat_id)
+                            await set_config(f"poster_skip_trailers:{chat_id}", str(now + 3600))
 
             # ── Rent collection (every 4 ticks ≈ 1 min) ──
             if counter % 4 == 0:

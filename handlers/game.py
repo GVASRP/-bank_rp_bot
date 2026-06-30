@@ -53,6 +53,7 @@ from database import (
     rent_car,
     get_tenant_car,
     evict_car_tenant,
+    create_credit_request,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
 from utils import format_amount, parse_amount, get_user_display, parse_org_flag, parse_org_purchase
@@ -71,20 +72,26 @@ async def cmd_vehicles(message: Message):
     if not market and not player:
         await message.reply("📭 Нет доступных автомобилей")
         return
-    lines = ["🚗 <b>Автомобили:</b>\n"]
+
+    MAX_CARS = 15
     idx = 1
+    lines = ["🚗 <b>Автомобили:</b>\n"]
+    remaining = 0
+
     if market:
         lines.append(f"🏪 <b>Автосалон ({len(market)} шт.):</b>")
-        for v in market:
+        for v in market[:MAX_CARS]:
             lines.append(
                 f"#{idx} — {v['year']} {v['make']} {v['model']}\n"
                 f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
             )
             idx += 1
+        remaining = max(0, len(market) - MAX_CARS)
         lines.append("")
     if player:
+        player_max = max(0, MAX_CARS - len(market[:MAX_CARS]))
         lines.append(f"🤝 <b>Б/У от игроков ({len(player)} шт.):</b>")
-        for v in player:
+        for v in player[:player_max]:
             seller = await get_user_by_telegram_id(v["owner_telegram_id"])
             seller_name = get_user_display(seller) if seller else "Неизвестно"
             lines.append(
@@ -92,8 +99,11 @@ async def cmd_vehicles(message: Message):
                 f"   💰 ${v['price']:,} | Продавец: {seller_name}"
             )
             idx += 1
+        remaining += max(0, len(player) - player_max)
         lines.append("")
-    lines.append("💡 <code>!купить номер</code> — купить авто")
+
+    extra = f"\n📄 И ещё {remaining} авто — <code>!авто_инфо N</code> для деталей\n" if remaining else ""
+    lines.append(f"{extra}💡 <code>!купить номер</code> — купить авто")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
@@ -1252,5 +1262,64 @@ async def cmd_transfer(message: Message):
 
     await message.reply(
         f"✅ <b>{asset_name}</b> передан {target_name}",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("автокредит", prefix="!/"))
+async def cmd_auto_credit(message: Message):
+    args = message.text.strip().split(maxsplit=2)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!автокредит НОМЕР_АВТО [первый_взнос]</code>\n"
+                           f"НОМЕР_АВТО — номер из <code>!авто</code>\n"
+                           f"Первый взнос — сумма, которую платите сразу (остальное в кредит)",
+                           parse_mode="HTML")
+        return
+
+    try:
+        pos = int(args[1])
+    except ValueError:
+        await message.reply("❌ Номер авто должен быть числом")
+        return
+
+    down_payment = 0
+    if len(args) >= 3:
+        dp = parse_amount(args[2])
+        if dp is None:
+            await message.reply("❌ Некорректная сумма взноса")
+            return
+        down_payment = dp
+
+    market = await get_available_vehicles(chat_id=message.chat.id)
+    if not market or pos < 1 or pos > len(market):
+        await message.reply("❌ Авто с таким номером не найдено в салоне")
+        return
+
+    v = market[pos - 1]
+
+    car_name = f"{v['year']} {v['make']} {v['model']}"
+    price = v["price"]
+    credit_amount = price - down_payment
+
+    if credit_amount <= 0:
+        await message.reply("❌ Сумма кредита должна быть больше 0")
+        return
+    if down_payment > 0:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.chat.id)
+        if user["balance"] < down_payment:
+            await message.reply(f"❌ Недостаточно средств для первого взноса. Баланс: <b>{format_amount(user['balance'])}</b>", parse_mode="HTML")
+            return
+        if not await update_balance(message.from_user.id, -down_payment, message.chat.id):
+            await message.reply("❌ Ошибка списания первого взноса")
+            return
+
+    req_id = await create_credit_request(message.from_user.id, credit_amount, vehicle_id=v.get("id", pos))
+
+    await message.reply(
+        f"📄 Запрос на автокредит для <b>{car_name}</b>\n"
+        f"💰 Сумма кредита: <b>{format_amount(credit_amount)}</b>\n"
+        f"💵 Первый взнос: <b>{format_amount(down_payment)}</b> (списан)\n"
+        f"Номер заявки: <b>#{req_id}</b>\n"
+        f"Ожидайте подтверждения администратора.",
         parse_mode="HTML",
     )

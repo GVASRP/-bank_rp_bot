@@ -90,6 +90,14 @@ async def init_db():
             except Exception:
                 pass
         try:
+            await conn.execute("ALTER TABLE credit_requests ADD COLUMN vehicle_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await conn.execute("ALTER TABLE credits ADD COLUMN vehicle_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
             await conn.execute("ALTER TABLE deposits ADD COLUMN duration_days INTEGER DEFAULT 30")
         except Exception:
             pass
@@ -333,7 +341,8 @@ async def init_db():
                     user_telegram_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
                     status TEXT DEFAULT 'pending',
-                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    vehicle_id INTEGER DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS deposit_requests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -715,19 +724,19 @@ async def get_transactions(telegram_id: int, limit: int = 10) -> list:
         await conn.close()
 
 
-async def create_credit_request(user_telegram_id: int, amount: int) -> int:
+async def create_credit_request(user_telegram_id: int, amount: int, vehicle_id: int = 0) -> int:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO credit_requests (user_telegram_id, amount) VALUES ($1, $2) RETURNING id",
-                user_telegram_id, amount,
+                "INSERT INTO credit_requests (user_telegram_id, amount, vehicle_id) VALUES ($1, $2, $3) RETURNING id",
+                user_telegram_id, amount, vehicle_id,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO credit_requests (user_telegram_id, amount) VALUES (?, ?)",
-                (user_telegram_id, amount),
+                "INSERT INTO credit_requests (user_telegram_id, amount, vehicle_id) VALUES (?, ?, ?)",
+                (user_telegram_id, amount, vehicle_id),
             )
             await conn.commit()
             return cursor.lastrowid
@@ -841,19 +850,19 @@ async def update_deposit_request(request_id: int, status: str) -> None:
         await conn.close()
 
 
-async def create_credit(user_telegram_id: int, amount: int, interest_rate: int = 10, duration_days: int = 30) -> int:
+async def create_credit(user_telegram_id: int, amount: int, interest_rate: int = 10, duration_days: int = 30, vehicle_id: int = 0) -> int:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow(
-                "INSERT INTO credits (user_telegram_id, amount, remaining, remaining_principal, interest_rate, duration_days) VALUES ($1, $2, $2, $2, $3, $4) RETURNING id",
-                user_telegram_id, amount, interest_rate, duration_days,
+                "INSERT INTO credits (user_telegram_id, amount, remaining, remaining_principal, interest_rate, duration_days, vehicle_id) VALUES ($1, $2, $2, $2, $3, $4, $5) RETURNING id",
+                user_telegram_id, amount, interest_rate, duration_days, vehicle_id,
             )
             return row["id"]
         else:
             cursor = await conn.execute(
-                "INSERT INTO credits (user_telegram_id, amount, remaining_principal, interest_rate, duration_days) VALUES (?, ?, ?, ?, ?)",
-                (user_telegram_id, amount, amount, interest_rate, duration_days),
+                "INSERT INTO credits (user_telegram_id, amount, remaining_principal, interest_rate, duration_days, vehicle_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_telegram_id, amount, amount, interest_rate, duration_days, vehicle_id),
             )
             await conn.commit()
             return cursor.lastrowid

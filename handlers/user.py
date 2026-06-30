@@ -196,8 +196,9 @@ async def cmd_my_credits(message: Message):
     for c in credits:
         info = calc_credit_debt(c)
         daily = int(c["amount"] * c["interest_rate"] / 100)
+        tag = "🚗 Авто" if (c.get("vehicle_id") or 0) else "💳"
         lines.append(
-            f"#{c['id']} — <b>{format_amount(c['amount'])}</b> долларов | {c['interest_rate']}%/день\n"
+            f"#{c['id']} {tag} — <b>{format_amount(c['amount'])}</b> долларов | {c['interest_rate']}%/день\n"
             f"   Срок: {c['duration_days']} дн. | Остаток тела: {format_amount(info['remaining_principal'])}\n"
             f"   % начислено: +{format_amount(info['total_interest'])} | Оплачено: {format_amount(info['interest_paid'])}\n"
             f"   Долг на сейчас: <b>{format_amount(info['total_debt'])}</b> | {format_amount(daily)}/день"
