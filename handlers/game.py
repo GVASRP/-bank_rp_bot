@@ -1,8 +1,8 @@
 import random
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import (
     get_or_create_user,
@@ -61,6 +61,58 @@ from utils import format_amount, parse_amount, get_user_display, parse_org_flag,
 router = Router()
 
 
+ITEMS_PER_PAGE = 10
+
+
+def build_car_items(market: list, player: list) -> tuple[list, int]:
+    items = []
+    if market:
+        for v in market:
+            items.append(("salon", v))
+    if player:
+        for v in player:
+            items.append(("player", v))
+    return items, len(market) if market else 0
+
+
+def format_car_page(items: list, page: int, market_count: int) -> str:
+    total = len(items)
+    start = page * ITEMS_PER_PAGE
+    end = min(start + ITEMS_PER_PAGE, total)
+    page_items = items[start:end]
+
+    lines = [f"🚗 <b>Автомобили:</b> (всего {total})\n"]
+
+    if market_count:
+        lines.append(f"🏪 <b>Автосалон ({market_count} шт.):</b>")
+    first_on_page = start + 1
+    for i, (src, v) in enumerate(page_items, first_on_page):
+        if src == "salon":
+            lines.append(
+                f"#{i} — {v['year']} {v['make']} {v['model']}\n"
+                f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
+            )
+        else:
+            lines.append(
+                f"#{i} — {v['year']} {v['make']} {v['model']}\n"
+                f"   💰 ${v['price']:,} | 🤝 Б/У от игрока"
+            )
+        if i < end:
+            lines.append("")
+    lines.append(f"💡 <code>!купить N</code> — купить авто")
+    return "\n".join(lines)
+
+
+def car_page_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    btns = []
+    if page > 0:
+        btns.append(InlineKeyboardButton(text="◀️", callback_data=f"авто:стр:{page - 1}"))
+    btns.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        btns.append(InlineKeyboardButton(text="▶️", callback_data=f"авто:стр:{page + 1}"))
+    return InlineKeyboardMarkup(inline_keyboard=[btns])
+
+
 @router.message(Command("авто", prefix="!/"))
 async def cmd_vehicles(message: Message):
     market = await get_available_vehicles(chat_id=message.chat.id)
@@ -73,38 +125,33 @@ async def cmd_vehicles(message: Message):
         await message.reply("📭 Нет доступных автомобилей")
         return
 
-    MAX_CARS = 15
-    idx = 1
-    lines = ["🚗 <b>Автомобили:</b>\n"]
-    remaining = 0
+    items, market_count = build_car_items(market or [], player or [])
+    total_pages = (len(items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+    text = format_car_page(items, 0, market_count)
+    kb = car_page_kb(0, total_pages) if total_pages > 1 else None
+    await message.reply(text, parse_mode="HTML", reply_markup=kb)
 
-    if market:
-        lines.append(f"🏪 <b>Автосалон ({len(market)} шт.):</b>")
-        for v in market[:MAX_CARS]:
-            lines.append(
-                f"#{idx} — {v['year']} {v['make']} {v['model']}\n"
-                f"   💰 ${v['price']:,} | {v['miles']:,} миль | 📍 {v['city']}"
-            )
-            idx += 1
-        remaining = max(0, len(market) - MAX_CARS)
-        lines.append("")
-    if player:
-        player_max = max(0, MAX_CARS - len(market[:MAX_CARS]))
-        lines.append(f"🤝 <b>Б/У от игроков ({len(player)} шт.):</b>")
-        for v in player[:player_max]:
-            seller = await get_user_by_telegram_id(v["owner_telegram_id"])
-            seller_name = get_user_display(seller) if seller else "Неизвестно"
-            lines.append(
-                f"#{idx} — {v['year']} {v['make']} {v['model']}\n"
-                f"   💰 ${v['price']:,} | Продавец: {seller_name}"
-            )
-            idx += 1
-        remaining += max(0, len(player) - player_max)
-        lines.append("")
 
-    extra = f"\n📄 И ещё {remaining} авто — <code>!авто_инфо N</code> для деталей\n" if remaining else ""
-    lines.append(f"{extra}💡 <code>!купить номер</code> — купить авто")
-    await message.reply("\n".join(lines), parse_mode="HTML")
+@router.callback_query(lambda c: c.data == "noop")
+async def noop_cb(query: CallbackQuery):
+    await query.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("авто:стр:"))
+async def car_page_cb(query: CallbackQuery):
+    page = int(query.data.split(":")[2])
+    chat_id = query.message.chat.id
+    market = await get_available_vehicles(chat_id=chat_id) or []
+    player = await get_player_listed_vehicles() or []
+    items, market_count = build_car_items(market, player)
+    total_pages = (len(items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+    if page < 0 or page >= total_pages:
+        await query.answer()
+        return
+    text = format_car_page(items, page, market_count)
+    kb = car_page_kb(page, total_pages) if total_pages > 1 else None
+    await query.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await query.answer()
 
 
 @router.message(Command("авто_инфо", prefix="!/"))
