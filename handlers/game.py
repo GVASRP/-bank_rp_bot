@@ -132,26 +132,32 @@ async def cmd_vehicles(message: Message):
     await message.reply(text, parse_mode="HTML", reply_markup=kb)
 
 
-@router.callback_query(lambda c: c.data == "noop")
+@router.callback_query(F.data == "noop")
 async def noop_cb(query: CallbackQuery):
     await query.answer()
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("авто:стр:"))
+@router.callback_query(F.data.regexp(r"^авто:стр:"))
 async def car_page_cb(query: CallbackQuery):
-    page = int(query.data.split(":")[2])
-    chat_id = query.message.chat.id
-    market = await get_available_vehicles(chat_id=chat_id) or []
-    player = await get_player_listed_vehicles() or []
-    items, market_count = build_car_items(market, player)
-    total_pages = (len(items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-    if page < 0 or page >= total_pages:
-        await query.answer()
+    try:
+        page = int(query.data.split(":")[2])
+    except (ValueError, IndexError):
+        await query.answer("❌ Ошибка данных", show_alert=True)
         return
-    text = format_car_page(items, page, market_count)
-    kb = car_page_kb(page, total_pages) if total_pages > 1 else None
-    await query.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    await query.answer()
+    try:
+        market = await get_available_vehicles(chat_id=query.message.chat.id) or []
+        player = await get_player_listed_vehicles() or []
+        items, market_count = build_car_items(market, player)
+        total_pages = (len(items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        if page < 0 or page >= total_pages:
+            await query.answer()
+            return
+        text = format_car_page(items, page, market_count)
+        page_kb = car_page_kb(page, total_pages) if total_pages > 1 else None
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=page_kb)
+        await query.answer()
+    except Exception as e:
+        await query.answer(f"❌ {e}", show_alert=True)
 
 
 @router.message(Command("авто_инфо", prefix="!/"))
