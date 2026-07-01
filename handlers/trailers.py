@@ -23,7 +23,7 @@ from database import (
     is_org_member,
 )
 from auto_poster import generate_trailer, format_trailer_caption
-from utils import format_amount, parse_amount, resolve_target, parse_org_flag, parse_org_purchase
+from utils import format_amount, parse_amount, resolve_target, parse_org_flag, parse_org_purchase, check_container_cooldown
 
 router = Router()
 
@@ -296,6 +296,14 @@ async def cmd_unlist_trailer(message: Message):
 
 @router.message(Command("контейнер_прицеп", prefix="!/"))
 async def cmd_trailer_container(message: Message):
+    uid = message.from_user.id
+    ok, wait = await check_container_cooldown(uid)
+    if not ok:
+        hrs = int(wait // 3600)
+        mins = int((wait % 3600) // 60)
+        await message.reply(f"⏳ Вы уже открывали контейнер сегодня. Подождите {hrs}ч {mins}м")
+        return
+
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
     CONTAINER_PRICE = 5000
     org_id, _ = parse_org_flag(message.text)

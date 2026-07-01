@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 
 from aiogram import Bot
@@ -7,7 +8,7 @@ logger = logging.getLogger(__name__)
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message
 
-from database import clear_user_username, get_user_by_username, get_or_create_user
+from database import clear_user_username, get_user_by_username, get_or_create_user, get_config, set_config
 
 ADMIN_CACHE = {}
 
@@ -176,3 +177,16 @@ def calc_credit_debt(credit: dict) -> dict:
         "total_interest": total_interest,
         "total_debt": total_debt,
     }
+
+
+async def check_container_cooldown(uid: int) -> tuple[bool, float]:
+    key = f"last_container:{uid}"
+    raw = await get_config(key)
+    now = time.time()
+    if raw:
+        last = float(raw)
+        elapsed = now - last
+        if elapsed < 86400:
+            return False, 86400 - elapsed
+    await set_config(key, str(now))
+    return True, 0

@@ -56,7 +56,7 @@ from database import (
     create_credit_request,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
-from utils import format_amount, parse_amount, get_user_display, parse_org_flag, parse_org_purchase
+from utils import format_amount, parse_amount, get_user_display, parse_org_flag, parse_org_purchase, check_container_cooldown
 
 router = Router()
 
@@ -439,6 +439,14 @@ CONTAINER_PRICE = 25_000
 
 @router.message(Command("контейнер", prefix="!/"))
 async def cmd_container(message: Message):
+    uid = message.from_user.id
+    ok, wait = await check_container_cooldown(uid)
+    if not ok:
+        hrs = int(wait // 3600)
+        mins = int((wait % 3600) // 60)
+        await message.reply(f"⏳ Вы уже открывали контейнер сегодня. Подождите {hrs}ч {mins}м")
+        return
+
     org_id, _ = parse_org_flag(message.text)
     if org_id and not await is_org_member(org_id, message.from_user.id):
         await message.reply("❌ Вы не участник этой организации")
@@ -852,6 +860,14 @@ HOUSE_CONTAINER_PRICE = 50_000
 
 @router.message(Command("контейнер_дом", prefix="!/"))
 async def cmd_house_container(message: Message):
+    uid = message.from_user.id
+    ok, wait = await check_container_cooldown(uid)
+    if not ok:
+        hrs = int(wait // 3600)
+        mins = int((wait % 3600) // 60)
+        await message.reply(f"⏳ Вы уже открывали контейнер сегодня. Подождите {hrs}ч {mins}м")
+        return
+
     org_id, clean_text = parse_org_flag(message.text)
     if org_id and not await is_org_member(org_id, message.from_user.id):
         await message.reply("❌ Вы не участник этой организации")
