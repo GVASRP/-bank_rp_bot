@@ -2257,14 +2257,14 @@ async def admin_take_vehicle(vehicle_id: int) -> bool:
             row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND status = 'sold' FOR UPDATE", vehicle_id)
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE id = $1", vehicle_id)
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available' WHERE id = $1", vehicle_id)
             return True
         else:
             cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND status = 'sold'", (vehicle_id,))
             row = await cursor.fetchone()
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, status = 'available' WHERE id = ?", (vehicle_id,))
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available' WHERE id = ?", (vehicle_id,))
             await conn.commit()
             return True
     finally:
@@ -2278,14 +2278,14 @@ async def admin_give_vehicle(vehicle_id: int, telegram_id: int) -> bool:
             row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND status = 'available' FOR UPDATE", vehicle_id)
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = $1, status = 'sold' WHERE id = $2", telegram_id, vehicle_id)
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = $1, org_id = NULL, status = 'sold' WHERE id = $2", telegram_id, vehicle_id)
             return True
         else:
             cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND status = 'available'", (vehicle_id,))
             row = await cursor.fetchone()
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, status = 'sold' WHERE id = ?", (telegram_id, vehicle_id))
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, org_id = NULL, status = 'sold' WHERE id = ?", (telegram_id, vehicle_id))
             await conn.commit()
             return True
     finally:
