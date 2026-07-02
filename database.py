@@ -2696,18 +2696,18 @@ async def get_available_houses(chat_id: int) -> list:
         await conn.close()
 
 
-async def get_user_houses(telegram_id: int, chat_id: int) -> list:
+async def get_user_houses(telegram_id: int, chat_id: int = 0) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
             rows = await conn.fetch(
-                "SELECT * FROM houses WHERE owner_telegram_id = $1 AND chat_id = $2 ORDER BY created_at DESC",
-                telegram_id, chat_id,
+                "SELECT * FROM houses WHERE owner_telegram_id = $1 ORDER BY created_at DESC",
+                telegram_id,
             )
         else:
             cursor = await conn.execute(
-                "SELECT * FROM houses WHERE owner_telegram_id = ? AND chat_id = ? ORDER BY created_at DESC",
-                (telegram_id, chat_id),
+                "SELECT * FROM houses WHERE owner_telegram_id = ? ORDER BY created_at DESC",
+                (telegram_id,),
             )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
