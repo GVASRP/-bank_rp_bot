@@ -1410,6 +1410,8 @@ REAL_BRAND_VALUE = {
 }
 
 def is_purchasable(make: str, model: str) -> bool:
+    if make.lower() == "navara":
+        return False
     return (make.lower(), model.lower()) in PURCHASABLE_SET
 
 COMMON_CARS = GREENVILLE_CARS_BUDGET + GREENVILLE_CARS_MID[:20]  # больше разнообразия

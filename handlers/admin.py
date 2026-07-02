@@ -1,3 +1,5 @@
+import random
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -42,6 +44,7 @@ from database import (
     get_vehicle,
     buy_vehicle,
     get_available_vehicles,
+    create_vehicle,
 )
 from auto_poster import force_post_one, force_post_house, force_post_trailer
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
@@ -1059,5 +1062,45 @@ async def cmd_stats(message: Message):
         f"🚗 Машин в продаже: <b>{stats['available_cars']}</b>\n"
         f"🏠 Домов в продаже: <b>{stats['available_houses']}</b>\n"
         f"🏆 <b>Топ-3:</b>\n" + "\n".join(top_lines),
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("добавить_авто", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_add_car(message: Message):
+    if not await ensure_admin(message):
+        return
+    parts = message.text.split(maxsplit=6)
+    if len(parts) < 5:
+        await message.reply(
+            "❌ Использование: <code>!добавить_авто Марка Модель Год Цена [пробег] [цвет]</code>\n"
+            "Пример: <code>!добавить_авто BMW M3 2020 45000 30000 синий</code>",
+            parse_mode="HTML",
+        )
+        return
+    try:
+        make = parts[1]
+        model = parts[2]
+        year = int(parts[3])
+        price = int(parts[4])
+    except ValueError:
+        await message.reply("❌ Год и цена должны быть числами")
+        return
+    miles = int(parts[5]) if len(parts) > 5 else random.randint(1000, 50000)
+    color = parts[6] if len(parts) > 6 else random.choice(["Черный", "Белый", "Синий", "Красный", "Серый", "Серебристый"])
+    vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
+    license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(100,999)}"
+    city = random.choice(["Милуоки", "Мадисон", "Грин-Бей", "Апплтон", "О-Клэр", "Кеноша", "Расин", "Ла-Кросс"])
+    vehicle_id = await create_vehicle(make, model, year, price, miles, city, vin, license_plate, color, "common", message.chat.id)
+    await message.reply(
+        f"✅ <b>Авто добавлено в салон!</b>\n\n"
+        f"🚗 <b>{year} {make} {model}</b>\n"
+        f"💰 Цена: ${price:,}\n"
+        f"📏 Пробег: {miles:,} миль\n"
+        f"🎨 Цвет: {color}\n"
+        f"📍 Город: {city}\n"
+        f"🆔 VIN: <code>{vin}</code>\n"
+        f"🔑 Номера: {license_plate}\n"
+        f"🏪 Номер в салоне: <b>#{vehicle_id}</b>",
         parse_mode="HTML",
     )
