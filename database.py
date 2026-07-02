@@ -2567,7 +2567,7 @@ async def unlist_house(house_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def buy_player_house(house_id: int, buyer_id: int, org_id: int | None = None):
+async def buy_player_house(house_id: int, buyer_id: int, org_id: int | None = None, chat_id: int = 0):
     conn = await get_conn()
     try:
         if _is_pg:
@@ -2580,8 +2580,8 @@ async def buy_player_house(house_id: int, buyer_id: int, org_id: int | None = No
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE houses SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
-                buyer_id, org_id, house_id,
+                "UPDATE houses SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                buyer_id, org_id, chat_id, house_id,
             )
             return seller_id, price
         else:
@@ -2594,8 +2594,8 @@ async def buy_player_house(house_id: int, buyer_id: int, org_id: int | None = No
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE houses SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
-                (buyer_id, org_id, house_id),
+                "UPDATE houses SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (buyer_id, org_id, chat_id, house_id),
             )
             await conn.commit()
             return seller_id, price
@@ -2715,7 +2715,7 @@ async def get_user_houses(telegram_id: int, chat_id: int) -> list:
         await conn.close()
 
 
-async def buy_house(house_id: int, telegram_id: int, org_id: int | None = None) -> bool:
+async def buy_house(house_id: int, telegram_id: int, org_id: int | None = None, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -2723,8 +2723,8 @@ async def buy_house(house_id: int, telegram_id: int, org_id: int | None = None) 
             if not row:
                 return False
             await conn.execute(
-                "UPDATE houses SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
-                telegram_id, org_id, house_id,
+                "UPDATE houses SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                telegram_id, org_id, chat_id, house_id,
             )
             return True
         else:
@@ -2733,8 +2733,8 @@ async def buy_house(house_id: int, telegram_id: int, org_id: int | None = None) 
             if not row:
                 return False
             await conn.execute(
-                "UPDATE houses SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
-                (telegram_id, org_id, house_id),
+                "UPDATE houses SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (telegram_id, org_id, chat_id, house_id),
             )
             await conn.commit()
             return True

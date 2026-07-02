@@ -710,9 +710,9 @@ async def cmd_buy_house(message: Message):
 
     if h["status"] == "player_listed":
         if own_org:
-            result = await buy_player_house(hid, uid, org_id)
+            result = await buy_player_house(hid, uid, org_id, message.chat.id)
         else:
-            result = await buy_player_house(hid, uid)
+            result = await buy_player_house(hid, uid, chat_id=message.chat.id)
         if not result:
             await refund_()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
@@ -730,9 +730,9 @@ async def cmd_buy_house(message: Message):
         )
     else:
         if own_org:
-            ok = await buy_house(hid, uid, org_id)
+            ok = await buy_house(hid, uid, org_id, message.chat.id)
         else:
-            ok = await buy_house(hid, uid)
+            ok = await buy_house(hid, uid, chat_id=message.chat.id)
         if not ok:
             await refund_()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
@@ -915,7 +915,7 @@ async def cmd_house_container(message: Message):
         message.chat.id, house["house_type_id"], house["neighborhood_id"],
         house["price"], house["guid"],
     )
-    await buy_house(house_id, uid)
+    await buy_house(house_id, uid, chat_id=message.chat.id)
     await add_transaction("container_house", uid, None, HOUSE_CONTAINER_PRICE,
                           f"Контейнер дом: {house['type_name']}")
     if paid_with_org:
