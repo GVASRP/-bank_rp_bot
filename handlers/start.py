@@ -59,7 +59,8 @@ async def cmd_start(message: Message):
         "🚗 <code>!орг_авто ID</code> / 🏠 <code>!орг_дома ID</code> / 🚛 <code>!орг_прицепы ID</code>\n"
         "💸 <code>!купить 5 орг 1</code> — оплата из орг\n"
         "💸 <code>!купить 5 орг 1 вл</code> — в собственность орг\n"
-        "🔄 <code>!передать ID @user</code> / <code>!передать ID орг ID</code>\n\n"
+        "🔄 <code>!передать ID @user</code> / <code>!передать ID орг ID</code>\n"
+        "🔄 <code>!передать дом N орг ID</code> — передать дом в организацию\n\n"
 
         "━━━ 🔹 <b>ТОПЛИВО</b> ━━━\n"
         "⛽ <code>!цена_топлива [сумма]</code> (админ)\n"

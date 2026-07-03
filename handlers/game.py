@@ -1273,30 +1273,47 @@ async def cmd_rental_cars(message: Message):
 
 @router.message(Command("передать", prefix="!/"))
 async def cmd_transfer(message: Message):
-    args = message.text.strip().split(maxsplit=3)
-    if len(args) < 3:
-        await message.reply("❌ Использование: <code>!передать ID @user</code> или <code>!передать ID орг ID</code>\n"
-                           "ID — номер авто или дома из <code>!мои_авто</code> / <code>!мои_дома</code>",
-                           parse_mode="HTML")
-        return
+    raw = message.text.strip()
+    house_only = raw.split(maxsplit=2)[1].lower() == "дом" if len(raw.split(maxsplit=2)) > 1 else False
 
-    try:
-        pos = int(args[1])
-    except ValueError:
-        await message.reply("❌ ID должен быть числом")
-        return
+    if house_only:
+        args = raw.split(maxsplit=4)
+        if len(args) < 4:
+            await message.reply("❌ Использование: <code>!передать дом НОМЕР орг ID</code>\n"
+                               "НОМЕР — номер дома из <code>!мои_дома</code>",
+                               parse_mode="HTML")
+            return
+        try:
+            pos = int(args[2])
+        except ValueError:
+            await message.reply("❌ Номер дома должен быть числом")
+            return
+        target_start = 3
+    else:
+        args = raw.split(maxsplit=3)
+        if len(args) < 3:
+            await message.reply("❌ Использование: <code>!передать ID @user</code> / <code>!передать ID орг ID</code>\n"
+                               "или <code>!передать дом НОМЕР орг ID</code> для дома",
+                               parse_mode="HTML")
+            return
+        try:
+            pos = int(args[1])
+        except ValueError:
+            await message.reply("❌ ID должен быть числом")
+            return
+        target_start = 2
 
     # Check if target is an org
     target_org_id = None
     new_owner_id = None
     target_name = ""
 
-    if args[2].lower() in ("орг", "org"):
-        if len(args) < 4:
+    if args[target_start].lower() in ("орг", "org"):
+        if len(args) < target_start + 2:
             await message.reply("❌ Укажите ID организации: <code>!передать ID орг ID</code>", parse_mode="HTML")
             return
         try:
-            target_org_id = int(args[3])
+            target_org_id = int(args[target_start + 1])
         except ValueError:
             await message.reply("❌ ID организации должен быть числом")
             return
@@ -1307,27 +1324,34 @@ async def cmd_transfer(message: Message):
         target_name = f"организация {org['name']}" if org else f"орг.#{target_org_id}"
         new_owner_id = message.from_user.id
     else:
-        tid, tname, tuname, _ = await resolve_target(message, args)
+        tid, tname, tuname, _ = await resolve_target(message, [args[0], args[target_start]])
         if not tid:
             await message.reply("❌ Пользователь не найден")
             return
         new_owner_id = tid
         target_name = tname
 
-    # Find the asset — try vehicles first, then houses
-    vehicles = await get_user_vehicles(message.from_user.id)
+    # Find the asset
     asset = None
     asset_type = ""
-    if 1 <= pos <= len(vehicles):
-        asset = vehicles[pos - 1]
-        asset_type = "vehicle"
-    else:
-        houses = await get_user_houses(message.from_user.id, message.chat.id)
+    if house_only:
+        houses = await get_user_houses(message.from_user.id)
         if 1 <= pos <= len(houses):
             asset = houses[pos - 1]
             asset_type = "house"
+    else:
+        vehicles = await get_user_vehicles(message.from_user.id)
+        if 1 <= pos <= len(vehicles):
+            asset = vehicles[pos - 1]
+            asset_type = "vehicle"
+        else:
+            houses = await get_user_houses(message.from_user.id)
+            if 1 <= pos <= len(houses):
+                asset = houses[pos - 1]
+                asset_type = "house"
     if not asset:
-        await message.reply(f"❌ Авто или дом #{pos} не найден")
+        msg = f"❌ Дом #{pos} не найден" if house_only else f"❌ Авто или дом #{pos} не найден"
+        await message.reply(msg)
         return
 
     asset_name = f"{asset.get('year', '')} {asset.get('make', '')} {asset.get('model', '')} {asset.get('type_name', '')}".strip()
