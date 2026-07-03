@@ -23,7 +23,7 @@ from database import (
     is_org_member,
 )
 from auto_poster import generate_trailer, format_trailer_caption
-from utils import format_amount, parse_amount, resolve_target, parse_org_flag, parse_org_purchase, check_container_cooldown
+from utils import format_amount, parse_amount, resolve_target, parse_org_flag, parse_org_purchase, check_container_cooldown, get_container_min_boost
 
 router = Router()
 
@@ -328,7 +328,12 @@ async def cmd_trailer_container(message: Message):
             await message.reply(f"❌ Недостаточно средств. Контейнер стоит ${CONTAINER_PRICE:,}")
             return
 
-    trailer = generate_trailer()
+    min_boost = await get_container_min_boost()
+    for _ in range(200):
+        trailer = generate_trailer()
+        if min_boost > 0 and trailer["price"] < min_boost:
+            continue
+        break
     vehicle_id = await create_trailer(
         trailer["make"], trailer["model"], trailer["year"], trailer["price"],
         trailer["miles"], trailer["description"], trailer["vin"], trailer["license_plate"],

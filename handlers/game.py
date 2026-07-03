@@ -56,7 +56,7 @@ from database import (
     create_credit_request,
 )
 from auto_poster import post_new_car, generate_car, post_new_house, generate_house
-from utils import format_amount, parse_amount, get_user_display, parse_org_flag, parse_org_purchase, check_container_cooldown
+from utils import format_amount, parse_amount, get_user_display, parse_org_flag, parse_org_purchase, check_container_cooldown, get_container_min_boost
 
 router = Router()
 
@@ -472,12 +472,16 @@ async def cmd_container(message: Message):
             )
             return
 
+    min_boost = await get_container_min_boost()
     for _ in range(200):
         car = generate_car()
         if car["rarity"] == "damaged":
             continue
-        if car["price"] < CONTAINER_PRICE * 0.8:
+        min_price = min_boost if min_boost > 0 else CONTAINER_PRICE * 0.8
+        if car["price"] < min_price:
             continue
+        if min_boost > 0:
+            break
         if car["rarity"] == "legendary" and random.random() < 0.70:
             continue
         if car["rarity"] == "rare" and random.random() < 0.30:
@@ -897,6 +901,7 @@ async def cmd_house_container(message: Message):
             return
 
     nbs = await get_all_neighborhoods()
+    min_boost = await get_container_min_boost()
     for _ in range(200):
         house = generate_house()
         if target_nb:
@@ -907,8 +912,11 @@ async def cmd_house_container(message: Message):
                     break
             if not match or house["neighborhood_id"] != match["id"]:
                 continue
-        if house["price"] < HOUSE_CONTAINER_PRICE * 1.5:
+        min_price = min_boost if min_boost > 0 else HOUSE_CONTAINER_PRICE * 1.5
+        if house["price"] < min_price:
             continue
+        if min_boost > 0:
+            break
         break
 
     house_id = await create_house_listing(

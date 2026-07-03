@@ -190,3 +190,8 @@ async def check_container_cooldown(uid: int) -> tuple[bool, float]:
             return False, 86400 - elapsed
     await set_config(key, str(now))
     return True, 0
+
+
+async def get_container_min_boost() -> int:
+    raw = await get_config("container_min_boost")
+    return int(raw) if raw and raw.lstrip("-").isdigit() else 0
