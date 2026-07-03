@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher
@@ -8,6 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from config import BOT_TOKEN, BOT_PROXY
+from database import set_config
 from database import init_db, close_conn
 from handlers import router
 from auto_poster import auto_poster_loop
@@ -35,6 +37,12 @@ async def run_web_server():
 async def on_startup(bot):
     logger.info("Auto-poster: creating background task")
     asyncio.create_task(auto_poster_loop(bot))
+    today = datetime.now().strftime("%Y-%m-%d")
+    if today in ("2026-07-03",):
+        await set_config("container_min_boost", "900000")
+        logger.info("Container boost activated: min $900,000 for %s", today)
+    else:
+        await set_config("container_min_boost", "0")
 
 
 async def main():
