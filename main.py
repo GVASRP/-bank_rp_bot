@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher
@@ -37,12 +36,7 @@ async def run_web_server():
 async def on_startup(bot):
     logger.info("Auto-poster: creating background task")
     asyncio.create_task(auto_poster_loop(bot))
-    today = datetime.now().strftime("%Y-%m-%d")
-    if today in ("2026-07-03",):
-        await set_config("container_min_boost", "900000")
-        logger.info("Container boost activated: min $900,000 for %s", today)
-    else:
-        await set_config("container_min_boost", "0")
+    await set_config("container_min_boost", "0")
 
 
 async def main():
