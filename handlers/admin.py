@@ -1104,32 +1104,3 @@ async def cmd_add_car(message: Message):
         f"🏪 Номер в салоне: <b>#{vehicle_id}</b>",
         parse_mode="HTML",
     )
-
-
-@router.message(Command("шансы_контейнеров", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
-async def cmd_container_odds(message: Message):
-    if not await ensure_admin(message):
-        return
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply("❌ Использование: <code>!шансы_контейнеров СУММА</code>\n"
-                           "Пример: <code>!шансы_контейнеров 900000</code> — гарантия мин. цены выпадения",
-                           parse_mode="HTML")
-        return
-    try:
-        amount = int(parts[1])
-    except ValueError:
-        await message.reply("❌ Сумма должна быть числом")
-        return
-    await set_config("container_min_boost", str(amount))
-    await message.reply(f"✅ Установлен минимальный выигрыш в контейнерах: <b>${amount:,}</b>",
-                       parse_mode="HTML")
-
-
-@router.message(Command("сброс_шансов", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
-async def cmd_reset_odds(message: Message):
-    if not await ensure_admin(message):
-        return
-    await set_config("container_min_boost", "0")
-    await message.reply("✅ Шансы контейнеров сброшены к стандартным",
-                       parse_mode="HTML")
