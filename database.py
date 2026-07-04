@@ -1687,7 +1687,7 @@ async def get_job_request(request_id: int) -> dict | None:
         await conn.close()
 
 
-UNIQUE_JOBS = {"Мэр", "Прокурор"}
+UNIQUE_JOBS = {"Мэр", "Прокурор", "Заместитель шерифа"}
 
 async def approve_job_request(request_id: int) -> bool:
     conn = await get_conn()
