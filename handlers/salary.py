@@ -85,7 +85,7 @@ async def cmd_jobs(message: Message):
         else:
             civilian.append(j)
 
-    UNIQUE = {"Мэр", "Прокурор", "Заместитель шерифа", "OCSO Agent"}
+    UNIQUE = {"Мэр", "Прокурор", "Заместитель шерифа", "IRS-CI Agent"}
     lines = ["💼 <b>Доступные профессии:</b>\n"]
     if law:
         lines.append("👮 <b>Правоохранители и юристы:</b>")
@@ -138,7 +138,7 @@ async def cmd_take_job(message: Message):
         await message.reply(f"❌ Профессия \"{job_name}\" не найдена. Список: <code>!работа</code>", parse_mode="HTML")
         return
 
-    if job["name"] in ("Мэр", "Прокурор", "Заместитель шерифа", "OCSO Agent") and await is_job_taken(message.chat.id, job["name"]):
+    if job["name"] in ("Мэр", "Прокурор", "Заместитель шерифа", "IRS-CI Agent") and await is_job_taken(message.chat.id, job["name"]):
         await message.reply(f"❌ Место \"{job['name']}\" уже занято. Всего 1 вакансия.", parse_mode="HTML")
         return
 

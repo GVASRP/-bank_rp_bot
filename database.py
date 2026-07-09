@@ -1482,7 +1482,7 @@ JOB_CATEGORIES = {
     "Адвокат": "law", "Заместитель шерифа": "law",
     "Офицер дорожной полиции": "law", "Полицейский": "law",
     "Городской клерк": "law",
-    "OCSO Agent": "law", "Deputy Sheriff": "law",
+    "IRS-CI Agent": "law", "Deputy Sheriff": "law",
     # Emergency
     "Пожарный": "emergency", "Фельдшер": "emergency",
     # Medical
@@ -1502,7 +1502,7 @@ DEFAULT_JOBS = [
     ("Заместитель шерифа", 3200),
     ("Офицер дорожной полиции", 2000), ("Полицейский", 2000),
     ("Городской клерк", 1500),
-    ("OCSO Agent", 3500), ("Deputy Sheriff", 2800),
+    ("IRS-CI Agent", 3500), ("Deputy Sheriff", 2800),
     # Emergency
     ("Пожарный", 1600), ("Фельдшер", 1800),
     # Medical
@@ -1800,7 +1800,7 @@ async def get_job_request(request_id: int) -> dict | None:
         await conn.close()
 
 
-UNIQUE_JOBS = {"Мэр", "Прокурор", "Заместитель шерифа", "OCSO Agent"}
+UNIQUE_JOBS = {"Мэр", "Прокурор", "Заместитель шерифа", "IRS-CI Agent"}
 
 async def approve_job_request(request_id: int) -> bool:
     conn = await get_conn()
