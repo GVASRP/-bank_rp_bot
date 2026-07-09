@@ -2490,6 +2490,25 @@ async def post_new_business(bot, chat_id: int, message_thread_id: int | None = N
     return False
 
 
+async def force_post_business(bot, chat_id: int, message_thread_id: int | None = None) -> str:
+    biz = generate_business()
+    try:
+        from database import create_business_listing
+        biz_id = await create_business_listing(chat_id, biz["business_type_id"], biz["price"], biz["guid"])
+    except ValueError as e:
+        return f"❌ {e}"
+    caption = format_business_caption(biz, biz_id)
+    send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
+    if message_thread_id:
+        send_args["message_thread_id"] = message_thread_id
+    try:
+        await bot.send_message(**send_args)
+        await mark_listing_posted(biz["guid"])
+        return f"✅ #{biz_id} {biz['type_name']} (${biz['price']:,})"
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
+
+
 async def auto_poster_loop(bot):
     logger.info("Auto-poster loop started (bot=%s)", type(bot).__name__)
     TICK = 15

@@ -49,7 +49,7 @@ from database import (
     get_available_vehicles,
     create_vehicle,
 )
-from auto_poster import force_post_one, force_post_house, force_post_trailer
+from auto_poster import force_post_one, force_post_house, force_post_trailer, force_post_business
 from utils import calc_credit_debt, calc_deposit_payout, format_amount, parse_amount, is_admin, get_user_mention, get_user_display, resolve_target
 
 router = Router()
@@ -485,6 +485,12 @@ async def cmd_auto_posts(message: Message):
         trailer_channel = await get_config(f"poster_trailers_channel:{chat_id}") or "этот чат"
         trailer_topic_raw = await get_config(f"poster_trailers_topic:{chat_id}")
 
+        biz_enabled = await get_config(f"poster_businesses_enabled:{chat_id}")
+        biz_interval = await get_config(f"poster_businesses_interval:{chat_id}") or "240"
+        biz_status = "✅" if biz_enabled == "1" else "❌"
+        biz_channel = await get_config(f"poster_businesses_channel:{chat_id}") or "этот чат"
+        biz_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
+
         await message.reply(
             f"📢 <b>Авто-объявления</b>\n\n"
             f"━ 🚗 <b>Машины:</b>\n"
@@ -492,7 +498,9 @@ async def cmd_auto_posts(message: Message):
             f"━ 🏠 <b>Дома:</b>\n"
             f"Статус: {house_status} | Интервал: {house_interval} мин | Канал: {house_channel}\n"
             f"━ 🚛 <b>Прицепы:</b>\n"
-            f"Статус: {trailer_status} | Интервал: {trailer_interval} мин | Канал: {trailer_channel}\n\n"
+            f"Статус: {trailer_status} | Интервал: {trailer_interval} мин | Канал: {trailer_channel}\n"
+            f"━ 🏪 <b>Бизнесы:</b>\n"
+            f"Статус: {biz_status} | Интервал: {biz_interval} мин | Канал: {biz_channel}\n\n"
             f"🚗 <b>Команды для машин:</b>\n"
             f"<code>!объявления машины вкл</code> — включить\n"
             f"<code>!объявления машины интервал 1</code> — интервал\n"
@@ -505,13 +513,19 @@ async def cmd_auto_posts(message: Message):
             f"<code>!объявления прицепы вкл</code> — включить\n"
             f"<code>!объявления прицепы интервал 1</code> — интервал\n"
             f"<code>!объявления прицепы тест</code> — тест\n\n"
+            f"🏪 <b>Команды для бизнесов:</b>\n"
+            f"<code>!объявления бизнесы вкл</code> — включить\n"
+            f"<code>!объявления бизнесы интервал 1</code> — интервал\n"
+            f"<code>!объявления бизнесы тест</code> — тест\n\n"
             f"📡 <b>Общее:</b>\n"
             f"<code>!объявления канал @channel</code> — канал для машин\n"
             f"<code>!объявления дома_канал @channel</code> — канал для домов\n"
             f"<code>!объявления прицепы_канал @channel</code> — канал для прицепов\n"
+            f"<code>!объявления бизнесы_канал @channel</code> — канал для бизнесов\n"
             f"<code>!объявления топик</code> — сохранить текущий топик (для тем машин)\n"
             f"<code>!объявления дома_топик</code> — сохранить топик для домов\n"
-            f"<code>!объявления прицепы_топик</code> — сохранить топик для прицепов",
+            f"<code>!объявления прицепы_топик</code> — сохранить топик для прицепов\n"
+            f"<code>!объявления бизнесы_топик</code> — сохранить топик для бизнесов",
             parse_mode="HTML",
         )
         return
@@ -637,6 +651,40 @@ async def cmd_auto_posts(message: Message):
             return
         await set_config(f"poster_trailers_topic:{chat_id}", str(mid))
         await message.reply(f"✅ Сохранён топик ID {mid} для прицепов.")
+    elif action == "бизнесы_канал":
+        if len(args) >= 3:
+            target_raw = args[2].lower()
+            if target_raw in ("этот_чат", "this_chat", "здесь"):
+                await set_config(f"poster_businesses_channel:{chat_id}", "")
+                await set_config(f"poster_businesses_topic:{chat_id}", "")
+                await message.reply("📢 Объявления бизнесов будут поститься в этот чат")
+                return
+            try:
+                target_id = int(target_raw)
+            except ValueError:
+                try:
+                    chat = await message.bot.get_chat(target_raw)
+                    target_id = chat.id
+                except Exception:
+                    await message.reply("❌ Не могу найти чат", parse_mode="HTML")
+                    return
+            await set_config(f"poster_businesses_channel:{chat_id}", str(target_id))
+            await set_config(f"poster_businesses_topic:{chat_id}", "")
+            await message.reply(f"📢 Объявления бизнесов будут поститься в чат {target_id}")
+        else:
+            current = await get_config(f"poster_businesses_channel:{chat_id}")
+            current_topic = await get_config(f"poster_businesses_topic:{chat_id}")
+            info = f"Чат: <code>{current}</code>" if current else "этот чат"
+            if current_topic:
+                info += f", Топик: <code>{current_topic}</code>"
+            await message.reply(f"📢 Текущий канал бизнесов: {info}", parse_mode="HTML")
+    elif action == "бизнесы_топик":
+        mid = message.message_thread_id
+        if not mid:
+            await message.reply("❌ Эта команда работает только внутри топика (темы).")
+            return
+        await set_config(f"poster_businesses_topic:{chat_id}", str(mid))
+        await message.reply(f"✅ Сохранён топик ID {mid} для бизнесов.")
     elif action == "прицепы" and len(args) >= 3:
         sub = args[2]
         if sub == "вкл":
@@ -715,13 +763,40 @@ async def cmd_auto_posts(message: Message):
                 await message.reply("❌ Укажите число минут")
         else:
             await message.reply("❌ Использование: <code>!объявления дома [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
+    elif action == "бизнесы" and len(args) >= 3:
+        sub = args[2]
+        if sub == "вкл":
+            await set_config(f"poster_businesses_enabled:{chat_id}", "1")
+            chats = await get_config("poster_chats") or ""
+            if str(chat_id) not in chats.split(","):
+                new_chats = ",".join(filter(None, [*chats.split(","), str(chat_id)]))
+                await set_config("poster_chats", new_chats)
+            await message.reply("✅ Авто-объявления бизнесов включены")
+        elif sub == "выкл":
+            await set_config(f"poster_businesses_enabled:{chat_id}", "0")
+            await message.reply("❌ Авто-объявления бизнесов выключены")
+        elif sub == "тест":
+            b_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
+            b_topic = int(b_topic_raw) if b_topic_raw else None
+            result = await force_post_business(message.bot, chat_id, b_topic)
+            await message.reply(result, parse_mode="HTML")
+        elif sub == "интервал" and len(args) >= 4:
+            try:
+                minutes = int(args[3])
+                await set_config(f"poster_businesses_interval:{chat_id}", str(max(1, minutes)))
+                await message.reply(f"✅ Интервал бизнесов: {minutes} минут")
+            except ValueError:
+                await message.reply("❌ Укажите число минут")
+        else:
+            await message.reply("❌ Использование: <code>!объявления бизнесы [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
     else:
         await message.reply(
             "❌ Неизвестная команда. Используй:\n"
             "<code>!объявления</code> — статус\n"
             "<code>!объявления машины вкл/выкл/тест/интервал N</code>\n"
             "<code>!объявления дома вкл/выкл/тест/интервал N</code>\n"
-            "<code>!объявления прицепы вкл/выкл/тест/интервал N</code>",
+            "<code>!объявления прицепы вкл/выкл/тест/интервал N</code>\n"
+            "<code>!объявления бизнесы вкл/выкл/тест/интервал N</code>",
             parse_mode="HTML",
         )
 
