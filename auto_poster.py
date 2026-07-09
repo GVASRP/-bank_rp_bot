@@ -2626,34 +2626,6 @@ async def auto_poster_loop(bot):
                             logger.warning("Trailer post failed for chat %s", chat_id)
                             await set_config(f"poster_skip_trailers:{chat_id}", str(now + 3600))
 
-                # ── Businesses ──
-                biz_enabled = await get_config(f"poster_businesses_enabled:{chat_id}")
-                biz_skip_until = await get_config(f"poster_skip_businesses:{chat_id}")
-                if biz_enabled == "1" and (not biz_skip_until or now > float(biz_skip_until)):
-                    b_interval_raw = await get_config(f"poster_businesses_interval:{chat_id}")
-                    b_interval = int(b_interval_raw) if b_interval_raw and b_interval_raw.isdigit() else 240
-                    b_target_raw = await get_config(f"poster_businesses_channel:{chat_id}")
-                    b_target = int(b_target_raw) if b_target_raw else chat_id
-                    b_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
-                    b_topic = int(b_topic_raw) if b_topic_raw else None
-
-                    b_last_key = f"poster_businesses_last:{chat_id}"
-                    b_last_raw = await get_config(b_last_key)
-                    b_last_ts = float(b_last_raw) if b_last_raw else 0.0
-                    b_elapsed = now - b_last_ts
-                    b_needed = b_interval * 60
-
-                    if b_elapsed >= b_needed:
-                        logger.info("Posting business for chat %s (interval=%s min)", chat_id, b_interval)
-                        ok = await post_new_business(bot, b_target, b_topic)
-                        await set_config(b_last_key, str(now))
-                        if ok:
-                            errors = 0
-                            await set_config(f"poster_skip_businesses:{chat_id}", "")
-                        else:
-                            logger.warning("Business post failed for chat %s", chat_id)
-                            await set_config(f"poster_skip_businesses:{chat_id}", str(now + 3600))
-
             # ── Rent collection (every 4 ticks ≈ 1 min) ──
             if counter % 4 == 0:
                 try:
