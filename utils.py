@@ -179,16 +179,28 @@ def calc_credit_debt(credit: dict) -> dict:
     }
 
 
-async def check_container_cooldown(uid: int) -> tuple[bool, float]:
-    key = f"last_container:{uid}"
-    raw = await get_config(key)
+async def check_container_cooldown(uid: int, ctype: str = "car") -> tuple[bool, float]:
+    old_key = f"last_container:{uid}"
+    new_key = f"last_container:{ctype}:{uid}"
     now = time.time()
-    if raw:
-        last = float(raw)
+    old_raw = await get_config(old_key)
+    if old_raw:
+        last = float(old_raw)
         elapsed = now - last
         if elapsed < 86400:
             return False, 86400 - elapsed
-    await set_config(key, str(now))
+        for t in ("car", "house", "trailer", "business"):
+            existing = await get_config(f"last_container:{t}:{uid}")
+            if not existing:
+                await set_config(f"last_container:{t}:{uid}", old_raw)
+        await set_config(old_key, "")
+    new_raw = await get_config(new_key)
+    if new_raw:
+        last = float(new_raw)
+        elapsed = now - last
+        if elapsed < 86400:
+            return False, 86400 - elapsed
+    await set_config(new_key, str(now))
     return True, 0
 
 

@@ -598,7 +598,7 @@ async def cmd_business_purchase_materials(message: Message):
 @router.message(Command("контейнер_бизнес", prefix="!/"))
 async def cmd_business_container(message: Message):
     uid = message.from_user.id
-    ok, wait = await check_container_cooldown(uid)
+    ok, wait = await check_container_cooldown(uid, "business")
     if not ok:
         hrs = int(wait // 3600)
         mins = int((wait % 3600) // 60)

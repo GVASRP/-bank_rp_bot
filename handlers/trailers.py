@@ -297,7 +297,7 @@ async def cmd_unlist_trailer(message: Message):
 @router.message(Command("контейнер_прицеп", prefix="!/"))
 async def cmd_trailer_container(message: Message):
     uid = message.from_user.id
-    ok, wait = await check_container_cooldown(uid)
+    ok, wait = await check_container_cooldown(uid, "trailer")
     if not ok:
         hrs = int(wait // 3600)
         mins = int((wait % 3600) // 60)

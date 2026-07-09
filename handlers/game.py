@@ -553,7 +553,7 @@ CONTAINER_PRICE = 25_000
 @router.message(Command("контейнер", prefix="!/"))
 async def cmd_container(message: Message):
     uid = message.from_user.id
-    ok, wait = await check_container_cooldown(uid)
+    ok, wait = await check_container_cooldown(uid, "car")
     if not ok:
         hrs = int(wait // 3600)
         mins = int((wait % 3600) // 60)
@@ -969,7 +969,7 @@ HOUSE_CONTAINER_PRICE = 50_000
 @router.message(Command("контейнер_дом", prefix="!/"))
 async def cmd_house_container(message: Message):
     uid = message.from_user.id
-    ok, wait = await check_container_cooldown(uid)
+    ok, wait = await check_container_cooldown(uid, "house")
     if not ok:
         hrs = int(wait // 3600)
         mins = int((wait % 3600) // 60)
