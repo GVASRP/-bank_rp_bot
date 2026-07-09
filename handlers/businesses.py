@@ -245,6 +245,7 @@ async def cmd_business_info(message: Message):
     is_open = b.get("is_open", "1")
     open_status = "✅ Открыт" if is_open == "1" else "❌ Закрыт"
     mat_bar = "█" * (materials // max(1, max_mat // 10)) + "░" * (10 - materials // max(1, max_mat // 10))
+    mat_cost = b.get("materials_cost", 100)
     await message.reply(
         f"🏪 <b>{b['type_name']}</b>\n"
         f"📂 Категория: {cat}\n"
@@ -253,6 +254,7 @@ async def cmd_business_info(message: Message):
         f"{mgr_line}"
         f"🚚 Доставок: {b.get('delivery_count', 0)}\n"
         f"📦 Материалы: {materials}/{max_mat} {mat_bar}\n"
+        f"💵 Стоимость ед. материалов: ${mat_cost:,}\n"
         f"{open_status}\n"
         f"📌 Статус: {owner}",
         parse_mode="HTML",
@@ -582,11 +584,13 @@ async def cmd_business_purchase_materials(message: Message):
         await message.reply(f"❌ Недостаточно средств. Нужно ${cost:,}", parse_mode="HTML")
         return
 
+    unit_cost = cost // bought if bought else 0
     await add_transaction("business_materials", None, message.from_user.id, -cost,
                           f"Закупка материалов для #{b['id']} {b['type_name']} ({bought} ед.)")
     await message.reply(
         f"✅ Закуплено <b>{bought}</b> ед. материалов для <b>{b['type_name']}</b>\n"
-        f"💰 Сумма: ${cost:,}",
+        f"💵 Цена за ед.: ${unit_cost:,}\n"
+        f"💰 Итого: ${cost:,}",
         parse_mode="HTML",
     )
 

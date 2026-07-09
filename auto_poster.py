@@ -2443,6 +2443,8 @@ def generate_business() -> dict:
                 "category": row[1],
                 "min_price": row[2],
                 "max_price": row[3],
+                "base_profit": row[4],
+                "materials_cost": row[6],
             }
             for i, row in enumerate(BT_SRC)
         ]
@@ -2455,15 +2457,22 @@ def generate_business() -> dict:
         "category": bt["category"],
         "price": price,
         "guid": guid,
+        "base_profit": bt["base_profit"],
+        "materials_cost": bt["materials_cost"],
     }
 
 
 def format_business_caption(biz: dict, biz_id: int) -> str:
+    base_profit = biz.get("base_profit", 0)
+    mat_cost = biz.get("materials_cost", 100)
+    profit_line = f"💰 Прибыль: ${base_profit:,}/доставка\n" if base_profit else ""
     return (
         f"🏪 <b>{biz['type_name']}</b>\n"
         f"📂 Категория: {biz['category']}\n"
         f"💰 Цена: ${biz['price']:,}\n"
-        f"🆔 #{biz_id} | 💡 <code>!купить_бизнес N</code>"
+        f"{profit_line}"
+        f"📦 Стоимость материалов: ${mat_cost:,}/ед.\n"
+        f"🆔 #{biz_id}"
     )
 
 
