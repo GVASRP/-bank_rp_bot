@@ -10,6 +10,7 @@ from database import (
     is_model_recently_posted, mark_model_posted, clean_old_model_posts,
     get_all_rented_houses, collect_rent,
     get_all_rented_cars, collect_car_rent,
+    get_all_business_types, create_business_listing,
 )
 
 logger = logging.getLogger(__name__)
@@ -2428,6 +2429,67 @@ async def force_post_trailer(bot, chat_id: int, message_thread_id: int | None = 
         return f"❌ Ошибка: {e}"
 
 
+BUSINESS_TYPES_CACHE = None
+
+
+def generate_business() -> dict:
+    global BUSINESS_TYPES_CACHE
+    if BUSINESS_TYPES_CACHE is None:
+        from database import BUSINESS_TYPES as BT_SRC
+        BUSINESS_TYPES_CACHE = [
+            {
+                "business_type_id": i + 1,
+                "type_name": row[0],
+                "category": row[1],
+                "min_price": row[2],
+                "max_price": row[3],
+            }
+            for i, row in enumerate(BT_SRC)
+        ]
+    bt = random.choice(BUSINESS_TYPES_CACHE)
+    price = random.randint(bt["min_price"], bt["max_price"])
+    guid = f"biz_{bt['business_type_id']}_{random.randint(100000, 999999)}"
+    return {
+        "business_type_id": bt["business_type_id"],
+        "type_name": bt["type_name"],
+        "category": bt["category"],
+        "price": price,
+        "guid": guid,
+    }
+
+
+def format_business_caption(biz: dict, biz_id: int) -> str:
+    return (
+        f"🏪 <b>{biz['type_name']}</b>\n"
+        f"📂 Категория: {biz['category']}\n"
+        f"💰 Цена: ${biz['price']:,}\n"
+        f"🆔 #{biz_id} | 💡 <code>!купить_бизнес N</code>"
+    )
+
+
+async def post_new_business(bot, chat_id: int, message_thread_id: int | None = None) -> bool:
+    for _ in range(50):
+        biz = generate_business()
+        if await is_listing_posted(biz["guid"]):
+            continue
+        try:
+            biz_id = await create_business_listing(chat_id, biz["business_type_id"], biz["price"], biz["guid"])
+        except ValueError:
+            continue
+        caption = format_business_caption(biz, biz_id)
+        send_args = {"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}
+        if message_thread_id:
+            send_args["message_thread_id"] = message_thread_id
+        try:
+            await bot.send_message(**send_args)
+            await mark_listing_posted(biz["guid"])
+            return True
+        except Exception as e:
+            logger.warning("Business post failed: %s", e)
+            return False
+    return False
+
+
 async def auto_poster_loop(bot):
     logger.info("Auto-poster loop started (bot=%s)", type(bot).__name__)
     TICK = 15
@@ -2535,6 +2597,34 @@ async def auto_poster_loop(bot):
                         else:
                             logger.warning("Trailer post failed for chat %s", chat_id)
                             await set_config(f"poster_skip_trailers:{chat_id}", str(now + 3600))
+
+                # ── Businesses ──
+                biz_enabled = await get_config(f"poster_businesses_enabled:{chat_id}")
+                biz_skip_until = await get_config(f"poster_skip_businesses:{chat_id}")
+                if biz_enabled == "1" and (not biz_skip_until or now > float(biz_skip_until)):
+                    b_interval_raw = await get_config(f"poster_businesses_interval:{chat_id}")
+                    b_interval = int(b_interval_raw) if b_interval_raw and b_interval_raw.isdigit() else 240
+                    b_target_raw = await get_config(f"poster_businesses_channel:{chat_id}")
+                    b_target = int(b_target_raw) if b_target_raw else chat_id
+                    b_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
+                    b_topic = int(b_topic_raw) if b_topic_raw else None
+
+                    b_last_key = f"poster_businesses_last:{chat_id}"
+                    b_last_raw = await get_config(b_last_key)
+                    b_last_ts = float(b_last_raw) if b_last_raw else 0.0
+                    b_elapsed = now - b_last_ts
+                    b_needed = b_interval * 60
+
+                    if b_elapsed >= b_needed:
+                        logger.info("Posting business for chat %s (interval=%s min)", chat_id, b_interval)
+                        ok = await post_new_business(bot, b_target, b_topic)
+                        await set_config(b_last_key, str(now))
+                        if ok:
+                            errors = 0
+                            await set_config(f"poster_skip_businesses:{chat_id}", "")
+                        else:
+                            logger.warning("Business post failed for chat %s", chat_id)
+                            await set_config(f"poster_skip_businesses:{chat_id}", str(now + 3600))
 
             # ── Rent collection (every 4 ticks ≈ 1 min) ──
             if counter % 4 == 0:

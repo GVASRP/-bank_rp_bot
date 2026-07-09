@@ -174,6 +174,10 @@ async def init_db():
             await seed_neighborhoods()
         except Exception:
             pass
+        try:
+            await seed_businesses()
+        except Exception:
+            pass
         # Remove old UNIQUE on telegram_id, add composite UNIQUE for per-group balances
         for cname in ["users_telegram_id_key", "uq_users_telegram_id"]:
             try:
@@ -246,6 +250,34 @@ async def init_db():
             )
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS business_types (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '',
+                min_price INTEGER NOT NULL DEFAULT 0,
+                max_price INTEGER NOT NULL DEFAULT 0,
+                base_profit INTEGER NOT NULL DEFAULT 0,
+                description TEXT DEFAULT ''
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS businesses (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL DEFAULT 0,
+                business_type_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                location TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                profit INTEGER NOT NULL DEFAULT 0,
+                owner_telegram_id BIGINT,
+                org_id BIGINT DEFAULT NULL,
+                status TEXT DEFAULT 'available',
+                manager_telegram_id BIGINT,
+                last_delivery TEXT,
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS deposits (
                 id SERIAL PRIMARY KEY,
                 user_telegram_id BIGINT NOT NULL,
@@ -281,6 +313,16 @@ async def init_db():
             await conn.execute("ALTER TABLE houses ADD COLUMN org_id BIGINT DEFAULT NULL")
         except Exception:
             pass
+        for col, default in (("delivery_count", 0), ("total_profit_earned", 0), ("materials", 0), ("max_materials", 100), ("materials_cost", 0), ("total_customers", 0), ("manager_salary", 0)):
+            try:
+                await conn.execute(f"ALTER TABLE businesses ADD COLUMN {col} INTEGER DEFAULT {default}")
+            except Exception:
+                pass
+        for col in ("is_open",):
+            try:
+                await conn.execute(f"ALTER TABLE businesses ADD COLUMN {col} TEXT DEFAULT '1'")
+            except Exception:
+                pass
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS job_roles (
                 id SERIAL PRIMARY KEY,
@@ -472,6 +514,34 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members (telegram_id);
                 DROP TABLE IF EXISTS user_salary;
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS business_types (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT '',
+                    min_price INTEGER NOT NULL DEFAULT 0,
+                    max_price INTEGER NOT NULL DEFAULT 0,
+                    base_profit INTEGER NOT NULL DEFAULT 0,
+                    description TEXT DEFAULT ''
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS businesses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    business_type_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    price INTEGER NOT NULL,
+                    profit INTEGER NOT NULL DEFAULT 0,
+                    owner_telegram_id INTEGER,
+                    org_id INTEGER DEFAULT NULL,
+                    status TEXT DEFAULT 'available',
+                    manager_telegram_id INTEGER,
+                    last_delivery TEXT,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                )
+            """)
             try:
                 await conn.execute("ALTER TABLE user_jobs ADD COLUMN last_payout TEXT")
             except Exception:
@@ -531,6 +601,15 @@ async def init_db():
                     await conn.commit()
                 except Exception:
                     pass
+            for col in ("delivery_count INTEGER DEFAULT 0", "total_profit_earned INTEGER DEFAULT 0",
+                         "materials INTEGER DEFAULT 0", "max_materials INTEGER DEFAULT 100",
+                         "materials_cost INTEGER DEFAULT 0", "total_customers INTEGER DEFAULT 0",
+                         "manager_salary INTEGER DEFAULT 0", "is_open TEXT DEFAULT '1'"):
+                try:
+                    await conn.execute(f"ALTER TABLE businesses ADD COLUMN {col}")
+                    await conn.commit()
+                except Exception:
+                    pass
             # Migration: add duration_days to deposits
             try:
                 await conn.execute("ALTER TABLE deposits ADD COLUMN duration_days INTEGER DEFAULT 30")
@@ -544,6 +623,10 @@ async def init_db():
                 pass
             try:
                 await seed_neighborhoods()
+            except Exception:
+                pass
+            try:
+                await seed_businesses()
             except Exception:
                 pass
         finally:
@@ -2377,6 +2460,165 @@ HOUSE_TYPE_NEIGHBORHOODS = {
 }
 
 
+# All business types sourced from https://greenville-wisconsin.fandom.com/wiki/Category:Locations
+BUSINESS_TYPES = [
+    # ── Gas Stations ──
+    ("AG Gas Station", "gas_station", 60000, 90000, 2000, "Сеть заправок с круглосуточным обслуживанием. Есть магазин, автомойка и зарядки для электромобилей."),
+    ("Clam Gas Station", "gas_station", 45000, 75000, 1500, "Небольшая заправочная станция. Удобное расположение для быстрой остановки."),
+
+    # ── Convenience Stores / Markets ──
+    ("Greenville Market", "convenience_store", 80000, 120000, 2500, "Продуктовый рынок в центре Гринвилля. Широкий ассортимент свежих продуктов."),
+    ("Quick Dollar", "convenience_store", 40000, 70000, 1200, "Магазин низких цен. Всё по одному доллару!"),
+    ("The Bulk Priced Food Shoppe", "convenience_store", 100000, 150000, 2800, "Оптовый продуктовый магазин. Выгодные цены на крупные партии."),
+    ("Just Buy", "convenience_store", 50000, 80000, 1500, "Небольшой универсальный магазин. Есть всё необходимое."),
+
+    # ── Restaurants ──
+    ("Bill's Diner", "restaurant", 60000, 90000, 1800, "Классический американский дайнер. Уютная атмосфера и домашняя еда."),
+    ("Bobahaus", "restaurant", 50000, 80000, 1500, "Модное кафе с чаем и закусками. Популярно среди молодёжи."),
+    ("British Fish & Chips", "restaurant", 55000, 85000, 1700, "Британская закусочная с традиционной рыбой с картошкой фри."),
+    ("Brookmere Brew", "restaurant", 70000, 100000, 2000, "Крафтовая пивоварня с собственной кухней. Живая музыка по выходным."),
+    ("Burger Knight", "restaurant", 90000, 130000, 2500, "Сетевой ресторан быстрого питания. Знаменитые бургеры и картошка фри."),
+    ("Burgerhaus", "restaurant", 90000, 130000, 2500, "Премиальная бургерная. Сочные стейки и авторские бургеры."),
+    ("Caffeine Street Coffee Co.", "restaurant", 50000, 80000, 1500, "Кофейня на главной улице. Свежая обжарка и домашняя выпечка."),
+    ("Connor's", "restaurant", 60000, 90000, 1800, "Ирландский паб с традиционной кухней и большим выбором пива."),
+    ("Crispi Cookies", "restaurant", 30000, 50000, 1000, "Пекарня с хрустящим печеньем. Аромат свежей выпечки на всю улицу."),
+    ("Dysku", "restaurant", 50000, 80000, 1500, "Современное кафе с интернациональной кухней."),
+    ("Farnsworth's", "restaurant", 80000, 120000, 2300, "Семейный ресторан с классической американской кухней."),
+    ("Fiesta Rodeo Mexican", "restaurant", 65000, 95000, 1900, "Мексиканский ресторан. Острые буррито и свежая сальса."),
+    ("Holey Smokes!", "restaurant", 70000, 100000, 2000, "Барбекю-ресторан. Копчёное мясо и домашние соусы."),
+    ("Home Barn American Grill", "restaurant", 90000, 130000, 2500, "Стейк-хаус в деревенском стиле. Отборное мясо на гриле."),
+    ("Hunty's Pizza Palace", "restaurant", 75000, 110000, 2300, "Пиццерия с толстым тестом. Доставка по всему Гринвиллю."),
+    ("Jimbo's Subs & Wraps", "restaurant", 55000, 85000, 1700, "Сэндвичная с огромными порциями. Свежие ингредиенты каждый день."),
+    ("JOGGIE'S", "restaurant", 40000, 65000, 1200, "Киоск с чипсами и закусками. Знаменитые чипсы со вкусом 'воздуха'."),
+    ("Kat's Kafe", "restaurant", 50000, 80000, 1500, "Уютное кафе с десертами. Любимое место для завтраков."),
+    ("Leo's Diner", "restaurant", 60000, 90000, 1800, "Круглосуточный дайнер. Завтрак подают в любое время."),
+    ("Noodle", "restaurant", 50000, 80000, 1500, "Азиатская лапшичная. Быстро, вкусно, дёшево."),
+    ("Noodles and Starblox", "restaurant", 70000, 100000, 2000, "Сетевое кафе с лапшой и кофе. Популярное место встреч."),
+    ("Ol' Texas", "restaurant", 90000, 130000, 2600, "Техасский стейк-хаус. Гигантские порции мяса и ковбойская атмосфера."),
+    ("Sonu Indian Cuisine", "restaurant", 70000, 100000, 2000, "Индийский ресторан с традиционными специями и карри."),
+    ("Superwich", "restaurant", 50000, 80000, 1500, "Закусочная с сэндвичами и сабми. Быстрое питание на ходу."),
+    ("Taco Castillo", "restaurant", 60000, 90000, 1800, "Мексиканское кафе с такос и начос. Острый соус входит в комплект."),
+    ("The Bread Shack", "restaurant", 45000, 70000, 1400, "Пекарня-булочная. Свежий хлеб и выпечка каждый час."),
+    ("The Ice Box", "restaurant", 35000, 55000, 1100, "Кафе-мороженое. Более 20 вкусов холодного десерта."),
+    ("The Ice Cream Station", "restaurant", 40000, 60000, 1200, "Киоск с мягким мороженым и молочными коктейлями."),
+    ("The Red Chopstick", "restaurant", 80000, 120000, 2300, "Китайский ресторан. Авторские блюда в классическом стиле."),
+    ("The Station", "restaurant", 65000, 95000, 1900, "Ресторан при ж/д станции. Атмосфера старых вокзалов."),
+    ("The Twist", "restaurant", 45000, 70000, 1400, "Кафе-мороженое с мягким сервисом. Любимое место детей."),
+    ("Vasitos", "restaurant", 60000, 90000, 1800, "Средиземноморский ресторан. Греческие салаты и свежие морепродукты."),
+    ("Visitors Sports Grill", "restaurant", 90000, 130000, 2500, "Спорт-бар с большими экранами. Болеем за местные команды!"),
+    ("Zumoqa Mexican Grill", "restaurant", 70000, 100000, 2000, "Мексиканский гриль. Фахитас и кесадильи на углях."),
+
+    # ── Auto Services ──
+    ("Brookmere Autos", "auto_service", 80000, 120000, 2500, "Автосервис в Брукмире. Диагностика и ремонт любых автомобилей."),
+    ("Dom's Service", "auto_service", 50000, 80000, 1500, "Небольшая автомастерская. Замена масла и мелкий ремонт."),
+    ("Fastlane", "auto_service", 60000, 90000, 1800, "Станция быстрого обслуживания. Шиномонтаж и замена жидкостей."),
+    ("Gary's Collision & Restoration", "auto_service", 100000, 160000, 3000, "Кузовной ремонт и реставрация. Вернём вашей машине былой блеск."),
+    ("Hurricane Car Wash", "auto_service", 50000, 80000, 1500, "Автомойка самообслуживания и бесконтактная мойка."),
+    ("Ignition Motor Parts", "auto_service", 80000, 120000, 2500, "Магазин автозапчастей и аксессуаров. Всё для тюнинга."),
+    ("Rapid Wash", "auto_service", 40000, 70000, 1200, "Экспресс-мойка. Чистота вашей машины за 5 минут."),
+    ("Roadmap Used Cars", "auto_service", 150000, 250000, 5000, "Автосалон подержанных автомобилей. Гарантия на каждый авто."),
+    ("Ron Rivers Auto Group", "auto_service", 200000, 350000, 6000, "Крупный автодилер с новыми и подержанными авто."),
+    ("Tires Plus", "auto_service", 60000, 100000, 2000, "Шиномонтаж и продажа шин. Сезонное хранение резины."),
+    ("Truck Planet", "auto_service", 100000, 160000, 3000, "Сервис грузовых автомобилей. Ремонт и обслуживание фур."),
+
+    # ── Entertainment ──
+    ("Greenville Movie Theater", "entertainment", 200000, 300000, 5000, "Кинотеатр с 3D и IMAX залами. Премьеры каждую пятницу."),
+    ("Timberwolf Drive-In Theater", "entertainment", 120000, 200000, 3500, "Автокинотеатр под открытым небом. Романтика на колёсах."),
+    ("Greenville Drag Strip", "entertainment", 250000, 400000, 6000, "Драг-полоса для уличных гонок. Ночные заезды по выходным."),
+    ("Willowbend Circuit", "entertainment", 300000, 500000, 7000, "Гоночная трасса с извилистыми поворотами. Трекинговые заезды."),
+    ("Wonder Waters", "entertainment", 150000, 250000, 4000, "Аквапарк с горками и бассейнами. Лучший отдых в жаркий день."),
+    ("Fox Campgrounds", "entertainment", 80000, 140000, 2500, "Кемпинг с местами для палаток и домиков. Отдых на природе."),
+
+    # ── Retail & Services ──
+    ("Celestial Outlet Mall", "other", 300000, 500000, 8000, "Торговый центр с брендовыми магазинами. Скидки до 70%!"),
+    ("Greenville Fan Store", "other", 40000, 70000, 1200, "Магазин сувениров и мерча Гринвилля."),
+    ("Ivy Accessories", "other", 40000, 65000, 1200, "Магазин аксессуаров и бижутерии. Модные украшения."),
+    ("Pear Store", "other", 80000, 150000, 2500, "Магазин электроники Pear. Смартфоны, планшеты и аксессуары."),
+    ("Craig's Sporting Goods", "other", 80000, 120000, 2500, "Спортивные товары и снаряжение. Одежда для активного отдыха."),
+    ("William's Paints", "other", 50000, 80000, 1500, "Магазин красок и строительных материалов. Ремонт под ключ."),
+    ("HeenerG", "other", 60000, 100000, 2000, "Магазин техники и электроники. Бытовая техника по низким ценам."),
+    ("Minato", "other", 70000, 120000, 2200, "Магазин японских товаров. Сувениры, сладости и манга."),
+    ("Seoul", "other", 70000, 120000, 2200, "Корейский магазин косметики и товаров для дома."),
+    ("Zerab", "other", 50000, 80000, 1500, "Студия подарков и сувениров. Индивидуальный подход к каждому."),
+    ("Verwire", "other", 60000, 100000, 2000, "Магазин техники и гаджетов. Всё для геймеров."),
+    ("ERCKO", "other", 50000, 80000, 1500, "Студия дизайна и интерьера."),
+    ("Crane Industries", "other", 200000, 350000, 5500, "Промышленное предприятие. Производство стройматериалов."),
+    ("Factory Pulse", "other", 250000, 400000, 6500, "Завод по производству электроники. Высокотехнологичное оборудование."),
+    ("ASAUSA", "other", 70000, 120000, 2200, "Логистическая компания. Грузоперевозки и складские услуги."),
+
+    # ── Personal Services ──
+    ("Beyond Beauty", "other", 40000, 70000, 1200, "Салон красоты. Стрижки, маникюр и косметология."),
+    ("The Barbers Chair", "other", 30000, 50000, 1000, "Мужская парикмахерская. Классические стрижки и бритьё."),
+    ("Enderson Cleaners", "other", 35000, 55000, 1100, "Химчистка и прачечная. Чистота вашей одежды."),
+    ("FluffyPaws Doggy Daycare", "other", 40000, 65000, 1200, "Дневной присмотр за собаками. Ваш питомец в надёжных руках."),
+    ("Heritage Animal Hospital", "other", 80000, 140000, 2500, "Ветеринарная клиника. Лечение и уход за домашними животными."),
+    ("Fox Mountain Medical Center", "other", 350000, 550000, 9000, "Медицинский центр. Круглосуточная помощь и диагностика."),
+    ("Infinity Health Center", "other", 100000, 180000, 3000, "Фитнес-центр с тренажёрным залом и бассейном."),
+    ("Karate Wisconsin", "other", 40000, 70000, 1200, "Школа карате. Тренировки для детей и взрослых."),
+    ("Nerd Squad", "other", 40000, 65000, 1200, "Ремонт компьютеров и настройка техники. Помощь в любое время."),
+    ("Little Ones Daycare Center", "other", 50000, 80000, 1500, "Детский сад и центр развития. Присмотр за детьми."),
+    ("Mini Tots", "other", 45000, 70000, 1300, "Детский центр раннего развития."),
+    ("WORK-IT", "other", 50000, 80000, 1500, "Тренажёрный зал. Фитнес и кроссфит."),
+    ("Greenville's Finest Fireworks", "other", 50000, 80000, 1500, "Магазин фейерверков. Салюты и пиротехника."),
+
+    # ── Financial & Legal ──
+    ("Allen Insurance Agency", "other", 60000, 100000, 2000, "Страховое агентство. Страхование жизни, авто и недвижимости."),
+    ("Family Insurance", "other", 50000, 90000, 1800, "Семейное страховое агентство. Доступные тарифы для всех."),
+    ("Fox Mountain Community Bank", "other", 300000, 500000, 8000, "Банк с полным спектром услуг. Кредиты и вклады."),
+    ("Moat & Castle Credit Union", "other", 200000, 350000, 6000, "Кредитный союз. Выгодные ставки и бонусы для членов."),
+    ("Pivora Banking Credit", "other", 250000, 400000, 7000, "Банковское учреждение. Инвестиции и финансовое планирование."),
+    ("John Jones Investments", "other", 100000, 180000, 3000, "Инвестиционная фирма. Управление капиталом."),
+    ("North Charleston Accounting & Tax Services", "other", 50000, 80000, 1500, "Бухгалтерские услуги и налоговое консультирование."),
+    ("Tax Office", "other", 60000, 100000, 2000, "Налоговое управление. Оформление и консультации."),
+    ("Rajkumar's Realtors", "other", 80000, 140000, 2500, "Риелторское агентство. Покупка и продажа недвижимости."),
+
+    # ── Hotels & Accommodation ──
+    ("Highway Motel", "other", 150000, 250000, 4000, "Придорожный мотель. Уютные номера и бесплатная парковка."),
+    ("Visit 24/7 Motel", "other", 120000, 200000, 3500, "Круглосуточный мотель. Заезд в любое время."),
+
+    # ── Storage & Misc ──
+    ("Seal Storage Solutions", "other", 40000, 70000, 1200, "Склад индивидуального хранения. Безопасность 24/7."),
+    ("Store-All Storage", "other", 40000, 70000, 1200, "Складские помещения для аренды. Разные размеры боксов."),
+    ("Denver Atwood Camping Supplies", "other", 50000, 80000, 1500, "Магазин туристического снаряжения. Палатки, спальники, горелки."),
+    ("Inview", "other", 60000, 100000, 2000, "Студия видеонаблюдения и безопасности."),
+    ("NextStop", "other", 50000, 80000, 1500, "Туристическое агентство. Планирование поездок и экскурсий."),
+    ("Greenville Post Office", "other", 60000, 100000, 2000, "Почтовое отделение. Отправка писем и посылок."),
+    ("Pearphone XIII", "other", 60000, 100000, 2000, "Ремонт и продажа смартфонов. Аксессуары и запчасти."),
+    ("Lent", "other", 50000, 80000, 1500, "Ломбард. Быстрые займы под залог вещей."),
+    ("Richfield", "other", 70000, 120000, 2200, "Заправочная станция с магазином. Полный бак и горячий кофе."),
+    ("Ridgeview", "other", 70000, 120000, 2200, "Станция техосмотра и обслуживания автомобилей."),
+    ("Just Water", "other", 30000, 50000, 1000, "Магазин питьевой воды. Чистая вода на разлив."),
+]
+
+async def seed_businesses() -> None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            existing = await conn.fetchval("SELECT COUNT(*) FROM business_types")
+        else:
+            cursor = await conn.execute("SELECT COUNT(*) FROM business_types")
+            row = await cursor.fetchone()
+            existing = row[0] if row else 0
+        if existing:
+            return
+        for i, bt in enumerate(BUSINESS_TYPES, 1):
+            name, category, min_price, max_price, base_profit, desc = bt
+            if _is_pg:
+                await conn.execute(
+                    "INSERT INTO business_types (id, name, category, min_price, max_price, base_profit, description) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+                    i, name, category, min_price, max_price, base_profit, desc,
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO business_types (id, name, category, min_price, max_price, base_profit, description) VALUES (?,?,?,?,?,?,?)",
+                    (i, name, category, min_price, max_price, base_profit, desc),
+                )
+        if not _is_pg:
+            await conn.commit()
+    finally:
+        await conn.close()
+
+
 async def seed_house_types() -> None:
     conn = await get_conn()
     try:
@@ -3863,5 +4105,498 @@ async def reset_all_balances(chat_id: int | None = None, new_balance: int = 0) -
                 cursor = await conn.execute("UPDATE users SET balance = ?", (new_balance,))
             await conn.commit()
             return cursor.rowcount
+    finally:
+        await conn.close()
+
+
+# ── Business functions ──────────────────────────────────────
+
+
+BUSINESS_SELECT = """
+    SELECT b.*, bt.name as type_name, bt.category as category,
+           bt.base_profit, bt.description as type_description
+    FROM businesses b
+    JOIN business_types bt ON bt.id = b.business_type_id
+"""
+
+
+async def get_business_type(type_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM business_types WHERE id = $1", type_id)
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute("SELECT * FROM business_types WHERE id = ?", (type_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_all_business_types() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT * FROM business_types ORDER BY id")
+        else:
+            cursor = await conn.execute("SELECT * FROM business_types ORDER BY id")
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_available_businesses(chat_id: int = 0) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            if chat_id:
+                rows = await conn.fetch(
+                    BUSINESS_SELECT + " WHERE b.chat_id = $1 AND b.status = 'available' ORDER BY b.created_at DESC",
+                    chat_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    BUSINESS_SELECT + " WHERE b.status = 'available' ORDER BY b.created_at DESC"
+                )
+        else:
+            if chat_id:
+                cursor = await conn.execute(
+                    BUSINESS_SELECT + " WHERE b.chat_id = ? AND b.status = 'available' ORDER BY b.created_at DESC",
+                    (chat_id,),
+                )
+            else:
+                cursor = await conn.execute(
+                    BUSINESS_SELECT + " WHERE b.status = 'available' ORDER BY b.created_at DESC"
+                )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_user_businesses(telegram_id: int, chat_id: int = 0) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            if chat_id:
+                rows = await conn.fetch(
+                    BUSINESS_SELECT + " WHERE b.owner_telegram_id = $1 AND b.chat_id = $2 ORDER BY b.created_at DESC",
+                    telegram_id, chat_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    BUSINESS_SELECT + " WHERE b.owner_telegram_id = $1 ORDER BY b.created_at DESC",
+                    telegram_id,
+                )
+        else:
+            if chat_id:
+                cursor = await conn.execute(
+                    BUSINESS_SELECT + " WHERE b.owner_telegram_id = ? AND b.chat_id = ? ORDER BY b.created_at DESC",
+                    (telegram_id, chat_id),
+                )
+            else:
+                cursor = await conn.execute(
+                    BUSINESS_SELECT + " WHERE b.owner_telegram_id = ? ORDER BY b.created_at DESC",
+                    (telegram_id,),
+                )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_player_listed_businesses() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                BUSINESS_SELECT + " WHERE b.status = 'player_listed' ORDER BY b.created_at DESC"
+            )
+        else:
+            cursor = await conn.execute(
+                BUSINESS_SELECT + " WHERE b.status = 'player_listed' ORDER BY b.created_at DESC"
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_business(business_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                BUSINESS_SELECT + " WHERE b.id = $1", business_id,
+            )
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute(
+                BUSINESS_SELECT + " WHERE b.id = ?", (business_id,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def create_business_listing(chat_id: int, business_type_id: int, price: int, guid: str) -> int:
+    bt = await get_business_type(business_type_id)
+    if not bt:
+        raise ValueError("Invalid business_type_id")
+    if price < bt["min_price"] or price > bt["max_price"]:
+        raise ValueError(f"Price must be between {bt['min_price']} and {bt['max_price']} for {bt['name']}")
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO businesses (chat_id, business_type_id, name, location, price, profit, materials_cost) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                chat_id, business_type_id, bt["name"], bt["name"], price, bt["base_profit"], 100,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO businesses (chat_id, business_type_id, name, location, price, profit, materials_cost) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (chat_id, business_type_id, bt["name"], bt["name"], price, bt["base_profit"], 100),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        await conn.close()
+
+
+async def buy_business(business_id: int, telegram_id: int, org_id: int | None = None, chat_id: int = 0) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM businesses WHERE id = $1 AND status = 'available' FOR UPDATE",
+                business_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                telegram_id, org_id, chat_id, business_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM businesses WHERE id = ? AND status = 'available'",
+                (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (telegram_id, org_id, chat_id, business_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def sell_business(business_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM businesses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' FOR UPDATE",
+                business_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET owner_telegram_id = NULL, status = 'available' WHERE id = $1",
+                business_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM businesses WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'",
+                (business_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET owner_telegram_id = NULL, status = 'available' WHERE id = ?",
+                (business_id,),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def list_business_for_sale(business_id: int, telegram_id: int, price: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM businesses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold' FOR UPDATE",
+                business_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET status = 'player_listed', price = $1 WHERE id = $2",
+                price, business_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM businesses WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'",
+                (business_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET status = 'player_listed', price = ? WHERE id = ?",
+                (price, business_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def unlist_business(business_id: int, telegram_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM businesses WHERE id = $1 AND owner_telegram_id = $2 AND status = 'player_listed' FOR UPDATE",
+                business_id, telegram_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET status = 'sold' WHERE id = $1", business_id,
+            )
+            return True
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM businesses WHERE id = ? AND owner_telegram_id = ? AND status = 'player_listed'",
+                (business_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            await conn.execute(
+                "UPDATE businesses SET status = 'sold' WHERE id = ?", (business_id,),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
+async def buy_player_business(business_id: int, buyer_id: int, org_id: int | None = None, chat_id: int = 0):
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM businesses WHERE id = $1 AND status = 'player_listed' FOR UPDATE",
+                business_id,
+            )
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE businesses SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                buyer_id, org_id, chat_id, business_id,
+            )
+            return seller_id, price
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM businesses WHERE id = ? AND status = 'player_listed'", (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            seller_id = row["owner_telegram_id"]
+            price = row["price"]
+            await conn.execute(
+                "UPDATE businesses SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (buyer_id, org_id, chat_id, business_id),
+            )
+            await conn.commit()
+            return seller_id, price
+    finally:
+        await conn.close()
+
+
+async def get_business_by_position(chat_id: int, position: int) -> dict | None:
+    businesses = await get_available_businesses(chat_id=chat_id)
+    if position < 1 or position > len(businesses):
+        return None
+    return businesses[position - 1]
+
+
+async def get_business_type_by_name(name: str) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT * FROM business_types WHERE LOWER(name) = LOWER($1)", name,
+            )
+            return dict(row) if row else None
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM business_types WHERE LOWER(name) = LOWER(?)", (name,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def set_business_manager(business_id: int, manager_id: int | None, chat_id: int = 0) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute(
+                "UPDATE businesses SET manager_telegram_id = $1 WHERE id = $2",
+                manager_id, business_id,
+            )
+            return "UPDATE 1" in (result or "")
+        else:
+            cursor = await conn.execute(
+                "UPDATE businesses SET manager_telegram_id = ? WHERE id = ?",
+                (manager_id, business_id),
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def record_business_delivery(business_id: int) -> tuple[bool, str]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT materials, is_open FROM businesses WHERE id = $1 FOR UPDATE",
+                business_id,
+            )
+            if not row:
+                return False, "❌ Бизнес не найден"
+            if row["is_open"] == "0":
+                return False, "❌ Бизнес закрыт — нет материалов"
+            if (row["materials"] or 0) <= 0:
+                await conn.execute("UPDATE businesses SET is_open = '0' WHERE id = $1", business_id)
+                return False, "❌ Материалы закончились, бизнес закрыт"
+            await conn.execute(
+                "UPDATE businesses SET materials = materials - 1, delivery_count = delivery_count + 1, "
+                "last_delivery = to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS') WHERE id = $1",
+                business_id,
+            )
+            return True, ""
+        else:
+            cursor = await conn.execute(
+                "SELECT materials, is_open FROM businesses WHERE id = ?",
+                (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False, "❌ Бизнес не найден"
+            if row["is_open"] == "0":
+                return False, "❌ Бизнес закрыт — нет материалов"
+            if (row["materials"] or 0) <= 0:
+                await conn.execute("UPDATE businesses SET is_open = '0' WHERE id = ?", (business_id,))
+                await conn.commit()
+                return False, "❌ Материалы закончились, бизнес закрыт"
+            from datetime import datetime
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await conn.execute(
+                "UPDATE businesses SET materials = materials - 1, delivery_count = delivery_count + 1, last_delivery = ? WHERE id = ?",
+                (now_str, business_id),
+            )
+            await conn.commit()
+            return True, ""
+    finally:
+        await conn.close()
+
+
+async def get_business_profit(business_id: int) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT b.profit, b.delivery_count, bt.base_profit FROM businesses b "
+                "JOIN business_types bt ON bt.id = b.business_type_id WHERE b.id = $1",
+                business_id,
+            )
+            if not row:
+                return 0
+            return row["base_profit"] + (row["delivery_count"] or 0) * int(row["base_profit"] * 0.1)
+        else:
+            cursor = await conn.execute(
+                "SELECT b.profit, b.delivery_count, bt.base_profit FROM businesses b "
+                "JOIN business_types bt ON bt.id = b.business_type_id WHERE b.id = ?",
+                (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return 0
+            return row["base_profit"] + (row["delivery_count"] or 0) * int(row["base_profit"] * 0.1)
+    finally:
+        await conn.close()
+
+
+async def purchase_business_materials(business_id: int, amount: int) -> tuple[bool, int, int]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT materials, max_materials, materials_cost FROM businesses WHERE id = $1 FOR UPDATE",
+                business_id,
+            )
+            if not row:
+                return False, 0, 0
+            materials = row["materials"] or 0
+            max_mat = row["max_materials"] or 100
+            cost_per_unit = row["materials_cost"] or 0
+            space = max_mat - materials
+            if space <= 0:
+                return False, 0, 0
+            can_buy = min(amount, space)
+            total_cost = can_buy * (cost_per_unit or 100)
+            await conn.execute(
+                "UPDATE businesses SET materials = materials + $1, materials_cost = $2, is_open = '1' WHERE id = $3",
+                can_buy, cost_per_unit or 100, business_id,
+            )
+            return True, can_buy, total_cost
+        else:
+            cursor = await conn.execute(
+                "SELECT materials, max_materials, materials_cost FROM businesses WHERE id = ?",
+                (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False, 0, 0
+            materials = row["materials"] or 0
+            max_mat = row["max_materials"] or 100
+            cost_per_unit = row["materials_cost"] or 0
+            space = max_mat - materials
+            if space <= 0:
+                return False, 0, 0
+            can_buy = min(amount, space)
+            total_cost = can_buy * (cost_per_unit or 100)
+            await conn.execute(
+                "UPDATE businesses SET materials = materials + ?, materials_cost = ?, is_open = '1' WHERE id = ?",
+                (can_buy, cost_per_unit or 100, business_id),
+            )
+            await conn.commit()
+            return True, can_buy, total_cost
     finally:
         await conn.close()
