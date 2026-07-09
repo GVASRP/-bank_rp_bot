@@ -698,9 +698,6 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_trailers_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления прицепов выключены")
         elif sub == "тест":
-            if message.from_user.username != "Na_ribalkee":
-                await message.reply("❌ Тест доступен только @Na_ribalkee")
-                return
             t_topic_raw = await get_config(f"poster_trailers_topic:{chat_id}")
             t_topic = int(t_topic_raw) if t_topic_raw else None
             result = await force_post_trailer(message.bot, chat_id, t_topic)
@@ -727,9 +724,6 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления машин выключены")
         elif sub == "тест":
-            if message.from_user.username != "Na_ribalkee":
-                await message.reply("❌ Тест доступен только @Na_ribalkee")
-                return
             topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
             topic = int(topic_raw) if topic_raw else None
             result = await force_post_one(message.bot, chat_id, topic)
@@ -756,9 +750,6 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_houses_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления домов выключены")
         elif sub == "тест":
-            if message.from_user.username != "Na_ribalkee":
-                await message.reply("❌ Тест доступен только @Na_ribalkee")
-                return
             topic_raw = await get_config(f"poster_houses_topic:{chat_id}")
             topic = int(topic_raw) if topic_raw else None
             result = await force_post_house(message.bot, chat_id, topic)
@@ -785,9 +776,6 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_businesses_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления бизнесов выключены")
         elif sub == "тест":
-            if message.from_user.username != "Na_ribalkee":
-                await message.reply("❌ Тест доступен только @Na_ribalkee")
-                return
             b_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
             b_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
             b_topic = int(b_topic_raw) if b_topic_raw else None

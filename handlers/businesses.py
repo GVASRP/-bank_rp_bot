@@ -62,12 +62,13 @@ def format_biz_page(items: list, page: int, market_count: int) -> str:
     first_on_page = start + 1
     for i, (src, b) in enumerate(page_items, first_on_page):
         cat = b.get("category", b.get("type_name", ""))
-        if src == "salon":
-            lines.append(f"#{i} — <b>{b['type_name']}</b> ({cat}) | 💰 ${b['price']:,}")
-        else:
-            lines.append(f"#{i} — <b>{b['type_name']}</b> ({cat}) | 💰 ${b['price']:,} (игрок)")
-        if i < end:
-            lines.append("")
+        profit = b.get("profit") or b.get("base_profit", 0)
+        mat_cost = b.get("materials_cost", 100)
+        tag = " (игрок)" if src == "player" else ""
+        lines.append(
+            f"#{i} — <b>{b['type_name']}</b> ({cat}){tag}\n"
+            f"    💰 ${b['price']:,} | 💵 ${profit:,}/доставка | 📦 ${mat_cost:,}/ед."
+        )
     lines.append(f"\n💡 <code>!купить_бизнес N</code> — купить бизнес")
     return "\n".join(lines)
 
@@ -131,9 +132,11 @@ async def format_my_biz_page(businesses: list, page: int) -> str:
         is_open = b.get("is_open", "1")
         open_icon = "✅" if is_open == "1" else "❌"
         mat_info = f" | {open_icon} {mat}/{max_mat}"
+        profit = b.get("profit") or b.get("base_profit", 0)
+        prof_info = f" | 💵 ${profit:,}/доставка"
         cat = b.get("category", "")
         lines.append(
-            f"#{idx} {status_emoji} <b>{b['type_name']}</b> ({cat}){price_info}{mgr}{mat_info}"
+            f"#{idx} {status_emoji} <b>{b['type_name']}</b> ({cat}){prof_info}{price_info}{mgr}{mat_info}"
         )
     lines.append("\n💡 <code>!продать_бизнес НОМЕР</code> — слить в гос (60%)")
     lines.append("💡 <code>!продать_бизнес НОМЕР цена</code> — выставить игрокам")
