@@ -2,7 +2,7 @@ import random
 
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import (
     get_or_create_user,
@@ -19,6 +19,9 @@ from database import (
     update_deposit_request,
     get_deposit_requests,
     get_all_deposits,
+    get_deposit_by_id,
+    withdraw_deposit,
+    update_credit_interest_rate,
     create_deposit_account,
     get_config,
     set_config,
@@ -847,6 +850,34 @@ async def cmd_delete_house(message: Message):
     await message.reply(f"✅ Дом #{hid} {h['type_name']} удалён")
 
 
+USER_CARS_PER_PAGE = 10
+
+
+def format_user_cars_page(vehicles: list, page: int, user_display: str) -> str:
+    total = len(vehicles)
+    start = page * USER_CARS_PER_PAGE
+    end = min(start + USER_CARS_PER_PAGE, total)
+    page_items = vehicles[start:end]
+
+    lines = [f"🚗 <b>Автомобили пользователя {user_display}:</b> (всего {total})\n"]
+    for v in page_items:
+        lines.append(
+            f"#{v['id']} — {v['year']} {v['make']} {v['model']} ({v['color']})\n"
+            f"   Статус: {v['status']} | Цена: ${v['price']:,}"
+        )
+    return "\n".join(lines)
+
+
+def user_cars_page_kb(page: int, total_pages: int, uid: int) -> InlineKeyboardMarkup:
+    btns = []
+    if page > 0:
+        btns.append(InlineKeyboardButton(text="◀️", callback_data=f"usercars:стр:{page - 1}:{uid}"))
+    btns.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        btns.append(InlineKeyboardButton(text="▶️", callback_data=f"usercars:стр:{page + 1}:{uid}"))
+    return InlineKeyboardMarkup(inline_keyboard=[btns])
+
+
 @router.message(Command("авто_пользователя", prefix="!/"))
 async def cmd_user_cars(message: Message):
     if not await ensure_admin(message):
@@ -863,13 +894,39 @@ async def cmd_user_cars(message: Message):
     if not vehicles:
         await message.reply("📭 У пользователя нет автомобилей")
         return
-    lines = [f"🚗 <b>Автомобили пользователя {args[1]}:</b>\n"]
-    for v in vehicles:
-        lines.append(
-            f"#{v['id']} — {v['year']} {v['make']} {v['model']} ({v['color']})\n"
-            f"   Статус: {v['status']} | Цена: ${v['price']:,}"
-        )
-    await message.reply("\n".join(lines), parse_mode="HTML")
+    page = 0
+    total_pages = (len(vehicles) + USER_CARS_PER_PAGE - 1) // USER_CARS_PER_PAGE
+    text = format_user_cars_page(vehicles, page, args[1])
+    kb = user_cars_page_kb(page, total_pages, uid) if total_pages > 1 else None
+    await message.reply(text, parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data.regexp(r"^usercars:стр:"))
+async def user_cars_page_cb(query: CallbackQuery):
+    try:
+        parts = query.data.split(":")
+        page = int(parts[2])
+        uid = int(parts[3])
+    except (ValueError, IndexError):
+        await query.answer("❌ Ошибка данных", show_alert=True)
+        return
+    try:
+        vehicles = await get_all_vehicles_by_owner(uid)
+        if not vehicles:
+            await query.message.edit_text("📭 У пользователя нет автомобилей")
+            await query.answer()
+            return
+        total_pages = (len(vehicles) + USER_CARS_PER_PAGE - 1) // USER_CARS_PER_PAGE
+        if page < 0 or page >= total_pages:
+            await query.answer()
+            return
+        user_display = query.message.text.split("\n")[0].split("</b>")[0].split("пользователя ")[-1] if query.message.text else ""
+        text = format_user_cars_page(vehicles, page, user_display)
+        page_kb = user_cars_page_kb(page, total_pages, uid) if total_pages > 1 else None
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=page_kb)
+        await query.answer()
+    except Exception as e:
+        await query.answer(f"❌ {e}", show_alert=True)
 
 
 @router.message(Command("изъять_авто", prefix="!/"))
@@ -922,7 +979,7 @@ async def cmd_give_car(message: Message):
     if v["status"] != "available":
         await message.reply(f"❌ Авто #{vid} недоступно (статус: {v['status']})")
         return
-    if not await admin_give_vehicle(vid, uid):
+    if not await admin_give_vehicle(vid, uid, chat_id=message.chat.id):
         await message.reply(f"❌ Ошибка выдачи")
         return
     await message.reply(f"✅ Авто #{vid} {v['year']} {v['make']} {v['model']} выдано пользователю {parts[1]}")
@@ -1102,5 +1159,89 @@ async def cmd_add_car(message: Message):
         f"🆔 VIN: <code>{vin}</code>\n"
         f"🔑 Номера: {license_plate}\n"
         f"🏪 Номер в салоне: <b>#{vehicle_id}</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("вернуть_вклад", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_close_deposit(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!вернуть_вклад ID</code>", parse_mode="HTML")
+        return
+
+    try:
+        deposit_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ Укажите числовой ID вклада")
+        return
+
+    deposit = await get_deposit_by_id(deposit_id)
+    if not deposit:
+        await message.reply(f"❌ Вклад #{deposit_id} не найден")
+        return
+    if deposit["status"] != "active":
+        await message.reply(f"❌ Вклад #{deposit_id} уже закрыт (статус: {deposit['status']})")
+        return
+
+    payout, interest = calc_deposit_payout(deposit)
+
+    if not await withdraw_deposit(deposit_id):
+        await message.reply(f"❌ Ошибка при закрытии вклада #{deposit_id}")
+        return
+
+    await update_balance(deposit["user_telegram_id"], payout, message.chat.id)
+    await add_transaction(
+        "deposit_close", None, deposit["user_telegram_id"], payout,
+        f"Вклад #{deposit_id} принудительно закрыт админом {message.from_user.full_name}",
+    )
+
+    await message.reply(
+        f"✅ Вклад #{deposit_id} закрыт!\n"
+        f"💰 Сумма вклада: <b>{format_amount(deposit['amount'])}</b>\n"
+        f"📈 Начислено процентов: <b>{format_amount(interest)}</b>\n"
+        f"💵 Выплачено: <b>{format_amount(payout)}</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("пересчет_кредитов", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_recalc_credits(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.reply(
+            "❌ Использование: <code>!пересчет_кредитов СТАРЫЙ_% НОВЫЙ_%</code>\n"
+            "Пример: <code>!пересчет_кредитов 10 20</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    try:
+        old_rate = float(args[1])
+        new_rate = float(args[2])
+    except ValueError:
+        await message.reply("❌ Проценты должны быть числами")
+        return
+
+    credits = await get_all_credits("active")
+    matching = [c for c in credits if c["interest_rate"] == old_rate]
+    if not matching:
+        await message.reply(f"❌ Нет активных кредитов со ставкой {old_rate}%")
+        return
+
+    updated = 0
+    for c in matching:
+        if await update_credit_interest_rate(c["id"], new_rate):
+            updated += 1
+
+    await message.reply(
+        f"✅ Обновлено кредитов: <b>{updated}</b> из <b>{len(matching)}</b>\n"
+        f"📊 Ставка изменена с <b>{old_rate}%</b> на <b>{new_rate}%</b>",
         parse_mode="HTML",
     )

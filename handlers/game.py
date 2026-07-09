@@ -62,6 +62,8 @@ router = Router()
 
 
 ITEMS_PER_PAGE = 10
+MY_CARS_PER_PAGE = 10
+MY_HOUSES_PER_PAGE = 10
 
 
 def build_car_items(market: list, player: list) -> tuple[list, int]:
@@ -154,6 +156,124 @@ async def car_page_cb(query: CallbackQuery):
             return
         text = format_car_page(items, page, market_count)
         page_kb = car_page_kb(page, total_pages) if total_pages > 1 else None
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=page_kb)
+        await query.answer()
+    except Exception as e:
+        await query.answer(f"❌ {e}", show_alert=True)
+
+
+# ── мои_авто pagination ──────────────────────────────────────
+
+def format_my_cars_page(vehicles: list, page: int) -> str:
+    total = len(vehicles)
+    start = page * MY_CARS_PER_PAGE
+    end = min(start + MY_CARS_PER_PAGE, total)
+    page_items = vehicles[start:end]
+
+    lines = [f"🚗 <b>Ваши автомобили:</b> (всего {total})\n"]
+    first_on_page = start + 1
+    for idx, v in enumerate(page_items, first_on_page):
+        status_emoji = "✅" if v["status"] == "sold" else "🔄"
+        price_info = f" | Цена: ${v['price']:,}" if v["status"] == "player_listed" else ""
+        lines.append(
+            f"#{idx} {status_emoji} {v['year']} {v['make']} {v['model']}\n"
+            f"   🔑 {v['license_plate']} | 📍 {v['city']}{price_info}"
+        )
+    lines.append("\n💡 <code>!продать_авто НОМЕР</code> — слить в гос (60%)")
+    lines.append("💡 <code>!продать НОМЕР цена</code> — выставить игрокам")
+    lines.append("💡 <code>!снять_продажу НОМЕР</code> — убрать из продажи")
+    return "\n".join(lines)
+
+
+def my_cars_page_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    btns = []
+    if page > 0:
+        btns.append(InlineKeyboardButton(text="◀️", callback_data=f"mycars:стр:{page - 1}"))
+    btns.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        btns.append(InlineKeyboardButton(text="▶️", callback_data=f"mycars:стр:{page + 1}"))
+    return InlineKeyboardMarkup(inline_keyboard=[btns])
+
+
+@router.callback_query(F.data.regexp(r"^mycars:стр:"))
+async def my_cars_page_cb(query: CallbackQuery):
+    try:
+        page = int(query.data.split(":")[2])
+    except (ValueError, IndexError):
+        await query.answer("❌ Ошибка данных", show_alert=True)
+        return
+    try:
+        vehicles = await get_user_vehicles(query.from_user.id, chat_id=query.message.chat.id)
+        if not vehicles:
+            await query.message.edit_text("📭 У вас нет автомобилей")
+            await query.answer()
+            return
+        total_pages = (len(vehicles) + MY_CARS_PER_PAGE - 1) // MY_CARS_PER_PAGE
+        if page < 0 or page >= total_pages:
+            await query.answer()
+            return
+        text = format_my_cars_page(vehicles, page)
+        page_kb = my_cars_page_kb(page, total_pages) if total_pages > 1 else None
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=page_kb)
+        await query.answer()
+    except Exception as e:
+        await query.answer(f"❌ {e}", show_alert=True)
+
+
+# ── мои_дома pagination ──────────────────────────────────────
+
+def format_my_houses_page(houses: list, page: int) -> str:
+    total = len(houses)
+    start = page * MY_HOUSES_PER_PAGE
+    end = min(start + MY_HOUSES_PER_PAGE, total)
+    page_items = houses[start:end]
+
+    lines = [f"🏠 <b>Ваши дома:</b> (всего {total})\n"]
+    first_on_page = start + 1
+    for idx, h in enumerate(page_items, first_on_page):
+        status_emoji = "✅" if h["status"] == "sold" else "🔄"
+        price_info = f" | Цена: ${h['price']:,}" if h["status"] == "player_listed" else ""
+        nb = h.get("neighborhood", "")
+        emoji = NEIGHBORHOOD_EMOJIS.get(nb, "🏠")
+        lines.append(
+            f"#{idx} {status_emoji} {h['type_name']}\n"
+            f"   {emoji} <b>{nb}</b>{price_info}"
+        )
+    lines.append("\n💡 <code>!продать_дом НОМЕР</code> — слить в гос (65%)")
+    lines.append("💡 <code>!продать_дом НОМЕР цена</code> — выставить игрокам")
+    lines.append("💡 <code>!снять_продажу_дома НОМЕР</code> — убрать из продажи")
+    return "\n".join(lines)
+
+
+def my_houses_page_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    btns = []
+    if page > 0:
+        btns.append(InlineKeyboardButton(text="◀️", callback_data=f"myhouses:стр:{page - 1}"))
+    btns.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        btns.append(InlineKeyboardButton(text="▶️", callback_data=f"myhouses:стр:{page + 1}"))
+    return InlineKeyboardMarkup(inline_keyboard=[btns])
+
+
+@router.callback_query(F.data.regexp(r"^myhouses:стр:"))
+async def my_houses_page_cb(query: CallbackQuery):
+    try:
+        page = int(query.data.split(":")[2])
+    except (ValueError, IndexError):
+        await query.answer("❌ Ошибка данных", show_alert=True)
+        return
+    try:
+        houses = await get_user_houses(query.from_user.id, query.message.chat.id)
+        if not houses:
+            await query.message.edit_text("📭 У вас нет домов")
+            await query.answer()
+            return
+        total_pages = (len(houses) + MY_HOUSES_PER_PAGE - 1) // MY_HOUSES_PER_PAGE
+        if page < 0 or page >= total_pages:
+            await query.answer()
+            return
+        text = format_my_houses_page(houses, page)
+        page_kb = my_houses_page_kb(page, total_pages) if total_pages > 1 else None
         await query.message.edit_text(text, parse_mode="HTML", reply_markup=page_kb)
         await query.answer()
     except Exception as e:
@@ -260,7 +380,7 @@ async def cmd_buy_car(message: Message):
         return
 
     if v["status"] == "player_listed":
-        result = await buy_player_vehicle(v["id"], uid)
+        result = await buy_player_vehicle(v["id"], uid, chat_id=message.chat.id)
         if not result:
             await refund()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
@@ -280,9 +400,9 @@ async def cmd_buy_car(message: Message):
         )
     else:
         if own_org:
-            ok = await buy_vehicle(v["id"], uid, org_id)
+            ok = await buy_vehicle(v["id"], uid, org_id, chat_id=message.chat.id)
         else:
-            ok = await buy_vehicle(v["id"], uid)
+            ok = await buy_vehicle(v["id"], uid, chat_id=message.chat.id)
         if not ok:
             await refund()
             await message.reply(f"❌ Ошибка покупки, деньги возвращены")
@@ -303,22 +423,15 @@ async def cmd_buy_car(message: Message):
 
 @router.message(Command("мои_авто", prefix="!/"))
 async def cmd_my_cars(message: Message):
-    vehicles = await get_user_vehicles(message.from_user.id)
+    vehicles = await get_user_vehicles(message.from_user.id, chat_id=message.chat.id)
     if not vehicles:
         await message.reply("📭 У вас нет автомобилей")
         return
-    lines = ["🚗 <b>Ваши автомобили:</b>\n"]
-    for idx, v in enumerate(vehicles, 1):
-        status_emoji = "✅" if v["status"] == "sold" else "🔄"
-        price_info = f" | Цена: ${v['price']:,}" if v["status"] == "player_listed" else ""
-        lines.append(
-            f"#{idx} {status_emoji} {v['year']} {v['make']} {v['model']}\n"
-            f"   🔑 {v['license_plate']} | 📍 {v['city']}{price_info}"
-        )
-    lines.append("\n💡 <code>!продать_авто НОМЕР</code> — слить в гос (60%)")
-    lines.append("💡 <code>!продать НОМЕР цена</code> — выставить игрокам")
-    lines.append("💡 <code>!снять_продажу НОМЕР</code> — убрать из продажи")
-    await message.reply("\n".join(lines), parse_mode="HTML")
+    page = 0
+    total_pages = (len(vehicles) + MY_CARS_PER_PAGE - 1) // MY_CARS_PER_PAGE
+    text = format_my_cars_page(vehicles, page)
+    kb = my_cars_page_kb(page, total_pages) if total_pages > 1 else None
+    await message.reply(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.message(Command("продать_авто", prefix="!/"))
@@ -375,7 +488,7 @@ async def cmd_list_car(message: Message):
         await message.reply("❌ Цена должна быть больше 0")
         return
 
-    user_vehicles = await get_user_vehicles(message.from_user.id)
+    user_vehicles = await get_user_vehicles(message.from_user.id, chat_id=message.chat.id)
     if pos < 1 or pos > len(user_vehicles):
         await message.reply(f"❌ Авто #{pos} не найдено")
         return
@@ -417,7 +530,7 @@ async def cmd_unlist_car(message: Message):
         await message.reply("❌ Номер должен быть числом")
         return
 
-    user_vehicles = await get_user_vehicles(message.from_user.id)
+    user_vehicles = await get_user_vehicles(message.from_user.id, chat_id=message.chat.id)
     if pos < 1 or pos > len(user_vehicles):
         await message.reply(f"❌ Авто #{pos} не найдено")
         return
@@ -494,7 +607,7 @@ async def cmd_container(message: Message):
         car["miles"], car["city"], car["vin"], car["license_plate"],
         car["color"], car["rarity"], message.chat.id,
     )
-    await buy_vehicle(vehicle_id, uid)
+    await buy_vehicle(vehicle_id, uid, chat_id=message.chat.id)
     await add_transaction("container", uid, None, CONTAINER_PRICE,
                           f"Контейнер: {car['year']} {car['make']} {car['model']}")
     if paid_with_org:
@@ -758,20 +871,11 @@ async def cmd_my_houses(message: Message):
     if not houses:
         await message.reply("📭 У вас нет домов")
         return
-    lines = ["🏠 <b>Ваши дома:</b>\n"]
-    for idx, h in enumerate(houses, 1):
-        status_emoji = "✅" if h["status"] == "sold" else "🔄"
-        price_info = f" | Цена: ${h['price']:,}" if h["status"] == "player_listed" else ""
-        nb = h.get("neighborhood", "")
-        emoji = NEIGHBORHOOD_EMOJIS.get(nb, "🏠")
-        lines.append(
-            f"#{idx} {status_emoji} {h['type_name']}\n"
-            f"   {emoji} <b>{nb}</b>{price_info}"
-        )
-    lines.append("\n💡 <code>!продать_дом НОМЕР</code> — слить в гос (65%)")
-    lines.append("💡 <code>!продать_дом НОМЕР цена</code> — выставить игрокам")
-    lines.append("💡 <code>!снять_продажу_дома НОМЕР</code> — убрать из продажи")
-    await message.reply("\n".join(lines), parse_mode="HTML")
+    page = 0
+    total_pages = (len(houses) + MY_HOUSES_PER_PAGE - 1) // MY_HOUSES_PER_PAGE
+    text = format_my_houses_page(houses, page)
+    kb = my_houses_page_kb(page, total_pages) if total_pages > 1 else None
+    await message.reply(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.message(Command("продать_дом", prefix="!/"))
@@ -1137,7 +1241,7 @@ async def cmd_rent_out_car(message: Message):
     if rent_price < 50:
         await message.reply("❌ Минимальная цена аренды: $50/день")
         return
-    cars = await get_user_vehicles(message.from_user.id)
+    cars = await get_user_vehicles(message.from_user.id, chat_id=message.chat.id)
     if position < 1 or position > len(cars):
         await message.reply(f"❌ У вас нет авто с номером {position}")
         return
@@ -1167,7 +1271,7 @@ async def cmd_unlist_car_rent(message: Message):
     except ValueError:
         await message.reply("❌ Номер должен быть числом")
         return
-    cars = await get_user_vehicles(message.from_user.id)
+    cars = await get_user_vehicles(message.from_user.id, chat_id=message.chat.id)
     if position < 1 or position > len(cars):
         await message.reply(f"❌ У вас нет авто с номером {position}")
         return
@@ -1340,7 +1444,7 @@ async def cmd_transfer(message: Message):
             asset = houses[pos - 1]
             asset_type = "house"
     else:
-        vehicles = await get_user_vehicles(message.from_user.id)
+        vehicles = await get_user_vehicles(message.from_user.id, chat_id=message.chat.id)
         if 1 <= pos <= len(vehicles):
             asset = vehicles[pos - 1]
             asset_type = "vehicle"
@@ -1356,7 +1460,7 @@ async def cmd_transfer(message: Message):
 
     asset_name = f"{asset.get('year', '')} {asset.get('make', '')} {asset.get('model', '')} {asset.get('type_name', '')}".strip()
 
-    ok = await transfer_asset(asset_type, asset["id"], new_owner_id, target_org_id)
+    ok = await transfer_asset(asset_type, asset["id"], new_owner_id, target_org_id, chat_id=message.chat.id)
     if not ok:
         await message.reply("❌ Ошибка передачи")
         return

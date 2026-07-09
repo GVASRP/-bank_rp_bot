@@ -107,9 +107,9 @@ async def cmd_buy_trailer(message: Message):
 
     if vehicle["status"] == "player_listed":
         if own_org:
-            result = await buy_player_trailer(vehicle["id"], uid, org_id)
+            result = await buy_player_trailer(vehicle["id"], uid, org_id, chat_id=message.chat.id)
         else:
-            result = await buy_player_trailer(vehicle["id"], uid)
+            result = await buy_player_trailer(vehicle["id"], uid, chat_id=message.chat.id)
         if not result:
             await message.reply("❌ Прицеп уже куплен")
             return
@@ -135,9 +135,9 @@ async def cmd_buy_trailer(message: Message):
         )
     else:
         if own_org:
-            ok = await buy_trailer(vehicle["id"], uid, org_id)
+            ok = await buy_trailer(vehicle["id"], uid, org_id, chat_id=message.chat.id)
         else:
-            ok = await buy_trailer(vehicle["id"], uid)
+            ok = await buy_trailer(vehicle["id"], uid, chat_id=message.chat.id)
         if not ok:
             await message.reply("❌ Прицеп уже куплен")
             return
@@ -193,7 +193,7 @@ async def cmd_trailer_info(message: Message):
 @router.message(Command("мои_прицепы", prefix="!/"))
 async def cmd_my_trailers(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
-    trailers = await get_user_trailers(message.from_user.id)
+    trailers = await get_user_trailers(message.from_user.id, chat_id=message.chat.id)
     if not trailers:
         await message.reply("🚛 У вас нет прицепов")
         return
@@ -340,7 +340,7 @@ async def cmd_trailer_container(message: Message):
         trailer["color"], trailer["rarity"], message.chat.id,
     )
 
-    ok2 = await buy_trailer(vehicle_id, uid)
+    ok2 = await buy_trailer(vehicle_id, uid, chat_id=message.chat.id)
     if not ok2:
         await message.reply("❌ Ошибка при выдаче прицепа")
         return

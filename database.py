@@ -1066,6 +1066,26 @@ async def get_all_deposits(status: str = "active") -> list:
         await conn.close()
 
 
+async def update_credit_interest_rate(credit_id: int, new_rate: float) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute(
+                "UPDATE credits SET interest_rate = $1 WHERE id = $2 AND status = 'active'",
+                new_rate, credit_id,
+            )
+            return result is not None
+        else:
+            await conn.execute(
+                "UPDATE credits SET interest_rate = ? WHERE id = ? AND status = 'active'",
+                (new_rate, credit_id),
+            )
+            await conn.commit()
+            return True
+    finally:
+        await conn.close()
+
+
 async def is_listing_posted(guid: str) -> bool:
     conn = await get_conn()
     try:
@@ -1285,13 +1305,19 @@ async def get_available_vehicles(chat_id: int | None = None, vehicle_type: str =
         await conn.close()
 
 
-async def get_user_vehicles(telegram_id: int, vehicle_type: str = 'car') -> list:
+async def get_user_vehicles(telegram_id: int, vehicle_type: str = 'car', chat_id: int = 0) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 AND vehicle_type = $2 ORDER BY id ASC", telegram_id, vehicle_type)
+            if chat_id:
+                rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 AND vehicle_type = $2 AND chat_id = $3 ORDER BY id ASC", telegram_id, vehicle_type, chat_id)
+            else:
+                rows = await conn.fetch("SELECT * FROM vehicles WHERE owner_telegram_id = $1 AND vehicle_type = $2 ORDER BY id ASC", telegram_id, vehicle_type)
         else:
-            cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? AND vehicle_type = ? ORDER BY id ASC", (telegram_id, vehicle_type))
+            if chat_id:
+                cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? AND vehicle_type = ? AND chat_id = ? ORDER BY id ASC", (telegram_id, vehicle_type, chat_id))
+            else:
+                cursor = await conn.execute("SELECT * FROM vehicles WHERE owner_telegram_id = ? AND vehicle_type = ? ORDER BY id ASC", (telegram_id, vehicle_type))
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -1373,6 +1399,7 @@ JOB_CATEGORIES = {
     "Адвокат": "law", "Заместитель шерифа": "law",
     "Офицер дорожной полиции": "law", "Полицейский": "law",
     "Городской клерк": "law",
+    "OCSO Agent": "law", "Deputy Sheriff": "law",
     # Emergency
     "Пожарный": "emergency", "Фельдшер": "emergency",
     # Medical
@@ -1382,19 +1409,21 @@ JOB_CATEGORIES = {
     "Контрабандист": "criminal", "Угонщик": "criminal",
     "Вор": "criminal", "Бандит": "criminal",
     "Сотрудник DOT (Дорожный департамент)": "civilian",
+    "Автомеханик": "civilian", "Грузоперевозчик": "civilian", "Инкассатор": "civilian",
 }
 
 DEFAULT_JOBS = [
     # Law Enforcement
-    ("Мэр", 4000), ("Судья", 3500), ("Шериф", 3000),
-    ("Прокурор", 2800), ("Адвокат", 2400),
-    ("Заместитель шерифа", 2400),
-    ("Офицер дорожной полиции", 2000), ("Полицейский", 1800),
+    ("Мэр", 5000), ("Судья", 3500), ("Шериф", 4500),
+    ("Прокурор", 3800), ("Адвокат", 2200),
+    ("Заместитель шерифа", 3200),
+    ("Офицер дорожной полиции", 2000), ("Полицейский", 2000),
     ("Городской клерк", 1500),
+    ("OCSO Agent", 3500), ("Deputy Sheriff", 2800),
     # Emergency
-    ("Пожарный", 2000), ("Фельдшер", 1800),
+    ("Пожарный", 1600), ("Фельдшер", 1800),
     # Medical
-    ("Врач", 2500), ("Медсестра", 1600),
+    ("Врач", 1800), ("Медсестра", 1600),
     # Criminal
     ("Хакер", 3000), ("Наркоторговец", 2800),
     ("Контрабандист", 2500), ("Угонщик", 2400),
@@ -1407,6 +1436,7 @@ DEFAULT_JOBS = [
     ("Водитель автобуса", 1400), ("Бармен", 1200),
     ("Таксист", 1200), ("Кассир", 1000),
     ("Работник заправки", 900), ("Официант", 800),
+    ("Автомеханик", 1500), ("Грузоперевозчик", 1400), ("Инкассатор", 1300),
 ]
 
 # (type_name, neighborhood, location, price, beds, baths, sqft, description)
@@ -1687,7 +1717,7 @@ async def get_job_request(request_id: int) -> dict | None:
         await conn.close()
 
 
-UNIQUE_JOBS = {"Мэр", "Прокурор", "Заместитель шерифа"}
+UNIQUE_JOBS = {"Мэр", "Прокурор", "Заместитель шерифа", "OCSO Agent"}
 
 async def approve_job_request(request_id: int) -> bool:
     conn = await get_conn()
@@ -1789,7 +1819,7 @@ async def unlist_vehicle(vehicle_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def buy_player_vehicle(vehicle_id: int, buyer_id: int, org_id: int | None = None) -> tuple | bool:
+async def buy_player_vehicle(vehicle_id: int, buyer_id: int, org_id: int | None = None, chat_id: int = 0) -> tuple | bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -1802,8 +1832,8 @@ async def buy_player_vehicle(vehicle_id: int, buyer_id: int, org_id: int | None 
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
-                buyer_id, org_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                buyer_id, org_id, chat_id, vehicle_id,
             )
             return seller_id, price
         else:
@@ -1816,8 +1846,8 @@ async def buy_player_vehicle(vehicle_id: int, buyer_id: int, org_id: int | None 
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
-                (buyer_id, org_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (buyer_id, org_id, chat_id, vehicle_id),
             )
             await conn.commit()
             return seller_id, price
@@ -1851,8 +1881,8 @@ async def get_available_trailers(chat_id: int | None = None) -> list:
     return await get_available_vehicles(chat_id=chat_id, vehicle_type='trailer')
 
 
-async def get_user_trailers(telegram_id: int) -> list:
-    return await get_user_vehicles(telegram_id, vehicle_type='trailer')
+async def get_user_trailers(telegram_id: int, chat_id: int = 0) -> list:
+    return await get_user_vehicles(telegram_id, vehicle_type='trailer', chat_id=chat_id)
 
 
 async def get_player_listed_trailers(chat_id: int = 0) -> list:
@@ -1890,7 +1920,7 @@ async def create_trailer(make: str, model: str, year: int, price: int, miles: in
         await conn.close()
 
 
-async def buy_trailer(vehicle_id: int, telegram_id: int, org_id: int | None = None) -> bool:
+async def buy_trailer(vehicle_id: int, telegram_id: int, org_id: int | None = None, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -1901,8 +1931,8 @@ async def buy_trailer(vehicle_id: int, telegram_id: int, org_id: int | None = No
             if not row:
                 return False
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
-                telegram_id, org_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                telegram_id, org_id, chat_id, vehicle_id,
             )
             return True
         else:
@@ -1914,8 +1944,8 @@ async def buy_trailer(vehicle_id: int, telegram_id: int, org_id: int | None = No
             if not row:
                 return False
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
-                (telegram_id, org_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (telegram_id, org_id, chat_id, vehicle_id),
             )
             await conn.commit()
             return True
@@ -2016,7 +2046,7 @@ async def unlist_trailer(vehicle_id: int, telegram_id: int) -> bool:
         await conn.close()
 
 
-async def buy_player_trailer(vehicle_id: int, buyer_id: int, org_id: int | None = None) -> tuple | bool:
+async def buy_player_trailer(vehicle_id: int, buyer_id: int, org_id: int | None = None, chat_id: int = 0) -> tuple | bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -2029,8 +2059,8 @@ async def buy_player_trailer(vehicle_id: int, buyer_id: int, org_id: int | None 
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
-                buyer_id, org_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                buyer_id, org_id, chat_id, vehicle_id,
             )
             return seller_id, price
         else:
@@ -2044,8 +2074,8 @@ async def buy_player_trailer(vehicle_id: int, buyer_id: int, org_id: int | None 
             seller_id = row["owner_telegram_id"]
             price = row["price"]
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
-                (buyer_id, org_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (buyer_id, org_id, chat_id, vehicle_id),
             )
             await conn.commit()
             return seller_id, price
@@ -2151,7 +2181,7 @@ async def get_vehicle_by_position(chat_id: int, position: int) -> dict | None:
     return vehicles[position - 1]
 
 
-async def buy_vehicle(vehicle_id: int, telegram_id: int, org_id: int | None = None) -> bool:
+async def buy_vehicle(vehicle_id: int, telegram_id: int, org_id: int | None = None, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
@@ -2159,8 +2189,8 @@ async def buy_vehicle(vehicle_id: int, telegram_id: int, org_id: int | None = No
             if not row:
                 return False
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold' WHERE id = $3",
-                telegram_id, org_id, vehicle_id,
+                "UPDATE vehicles SET owner_telegram_id = $1, org_id = $2, status = 'sold', chat_id = $3 WHERE id = $4",
+                telegram_id, org_id, chat_id, vehicle_id,
             )
             return True
         else:
@@ -2169,8 +2199,8 @@ async def buy_vehicle(vehicle_id: int, telegram_id: int, org_id: int | None = No
             if not row:
                 return False
             await conn.execute(
-                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold' WHERE id = ?",
-                (telegram_id, org_id, vehicle_id),
+                "UPDATE vehicles SET owner_telegram_id = ?, org_id = ?, status = 'sold', chat_id = ? WHERE id = ?",
+                (telegram_id, org_id, chat_id, vehicle_id),
             )
             await conn.commit()
             return True
@@ -2257,35 +2287,35 @@ async def admin_take_vehicle(vehicle_id: int) -> bool:
             row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND status = 'sold' FOR UPDATE", vehicle_id)
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available' WHERE id = $1", vehicle_id)
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE id = $1", vehicle_id)
             return True
         else:
             cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND status = 'sold'", (vehicle_id,))
             row = await cursor.fetchone()
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available' WHERE id = ?", (vehicle_id,))
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE id = ?", (vehicle_id,))
             await conn.commit()
             return True
     finally:
         await conn.close()
 
 
-async def admin_give_vehicle(vehicle_id: int, telegram_id: int) -> bool:
+async def admin_give_vehicle(vehicle_id: int, telegram_id: int, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
             row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND status = 'available' FOR UPDATE", vehicle_id)
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = $1, org_id = NULL, status = 'sold' WHERE id = $2", telegram_id, vehicle_id)
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = $1, org_id = NULL, status = 'sold', chat_id = $2 WHERE id = $3", telegram_id, chat_id, vehicle_id)
             return True
         else:
             cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND status = 'available'", (vehicle_id,))
             row = await cursor.fetchone()
             if not row:
                 return False
-            await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, org_id = NULL, status = 'sold' WHERE id = ?", (telegram_id, vehicle_id))
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = ?, org_id = NULL, status = 'sold', chat_id = ? WHERE id = ?", (telegram_id, chat_id, vehicle_id))
             await conn.commit()
             return True
     finally:
@@ -2700,15 +2730,27 @@ async def get_user_houses(telegram_id: int, chat_id: int = 0) -> list:
     conn = await get_conn()
     try:
         if _is_pg:
-            rows = await conn.fetch(
-                "SELECT * FROM houses WHERE owner_telegram_id = $1 ORDER BY created_at DESC",
-                telegram_id,
-            )
+            if chat_id:
+                rows = await conn.fetch(
+                    "SELECT * FROM houses WHERE owner_telegram_id = $1 AND chat_id = $2 ORDER BY created_at DESC",
+                    telegram_id, chat_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM houses WHERE owner_telegram_id = $1 ORDER BY created_at DESC",
+                    telegram_id,
+                )
         else:
-            cursor = await conn.execute(
-                "SELECT * FROM houses WHERE owner_telegram_id = ? ORDER BY created_at DESC",
-                (telegram_id,),
-            )
+            if chat_id:
+                cursor = await conn.execute(
+                    "SELECT * FROM houses WHERE owner_telegram_id = ? AND chat_id = ? ORDER BY created_at DESC",
+                    (telegram_id, chat_id),
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT * FROM houses WHERE owner_telegram_id = ? ORDER BY created_at DESC",
+                    (telegram_id,),
+                )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -3611,7 +3653,7 @@ async def delete_org(org_id: int) -> bool:
         await conn.close()
 
 
-async def transfer_asset(item_type: str, item_id: int, new_owner_id: int | None = None, new_org_id: int | None = None) -> bool:
+async def transfer_asset(item_type: str, item_id: int, new_owner_id: int | None = None, new_org_id: int | None = None, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
         if item_type == "vehicle":
@@ -3622,14 +3664,14 @@ async def transfer_asset(item_type: str, item_id: int, new_owner_id: int | None 
             return False
         if _is_pg:
             result = await conn.execute(
-                f"UPDATE {table} SET owner_telegram_id = $1, org_id = $2 WHERE id = $3",
-                new_owner_id, new_org_id, item_id,
+                f"UPDATE {table} SET owner_telegram_id = $1, org_id = $2, chat_id = $3 WHERE id = $4",
+                new_owner_id, new_org_id, chat_id, item_id,
             )
             return "UPDATE 1" in (result or "")
         else:
             cursor = await conn.execute(
-                f"UPDATE {table} SET owner_telegram_id = ?, org_id = ? WHERE id = ?",
-                (new_owner_id, new_org_id, item_id),
+                f"UPDATE {table} SET owner_telegram_id = ?, org_id = ?, chat_id = ? WHERE id = ?",
+                (new_owner_id, new_org_id, chat_id, item_id),
             )
             await conn.commit()
             return cursor.rowcount > 0
