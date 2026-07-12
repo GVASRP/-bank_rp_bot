@@ -1272,14 +1272,31 @@ async def clear_posted_listings() -> int:
         await conn.close()
 
 
-async def clear_available_vehicles() -> int:
+async def clear_available_vehicles(vehicle_type: str | None = None) -> int:
+    conn = await get_conn()
+    try:
+        where = " WHERE status = 'available'"
+        if vehicle_type:
+            where += f" AND vehicle_type = '{vehicle_type}'"
+        if _is_pg:
+            result = await conn.execute(f"DELETE FROM vehicles{where}")
+            return int(result.split()[-1]) if result else 0
+        else:
+            cursor = await conn.execute(f"DELETE FROM vehicles{where}")
+            await conn.commit()
+            return cursor.rowcount
+    finally:
+        await conn.close()
+
+
+async def clear_available_houses() -> int:
     conn = await get_conn()
     try:
         if _is_pg:
-            result = await conn.execute("DELETE FROM vehicles WHERE status = 'available'")
+            result = await conn.execute("DELETE FROM houses WHERE status = 'available'")
             return int(result.split()[-1]) if result else 0
         else:
-            cursor = await conn.execute("DELETE FROM vehicles WHERE status = 'available'")
+            cursor = await conn.execute("DELETE FROM houses WHERE status = 'available'")
             await conn.commit()
             return cursor.rowcount
     finally:

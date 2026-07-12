@@ -34,6 +34,7 @@ from database import (
     clear_user_vehicles,
     clear_posted_listings,
     clear_available_vehicles,
+    clear_available_houses,
     reset_all_balances,
     cleanup_orphan_vehicles,
     apply_start_balance_to_poor,
@@ -1100,13 +1101,32 @@ async def cmd_clear_user_cars(message: Message):
 async def cmd_clear_listings(message: Message):
     if not await ensure_admin(message):
         return
-    posted = await clear_posted_listings()
-    avail = await clear_available_vehicles()
+    args = message.text.split()
+    target = args[1].lower() if len(args) >= 2 else "всё"
+
+    parts = []
+    if target in ("всё", "машины", "авто"):
+        c = await clear_available_vehicles("car")
+        if c:
+            parts.append(f"• {c} непроданных авто")
+    if target in ("всё", "прицепы"):
+        c = await clear_available_vehicles("trailer")
+        if c:
+            parts.append(f"• {c} непроданных прицепов")
+    if target in ("всё", "дома"):
+        c = await clear_available_houses()
+        if c:
+            parts.append(f"• {c} непроданных домов")
+    if target == "всё":
+        posted = await clear_posted_listings()
+        parts.insert(0, f"• {posted} записей в архиве объявлений")
+
+    if not parts:
+        await message.reply("✅ Всё чисто, удалять нечего")
+        return
     await message.reply(
-        f"🗑 Очищено:\n"
-        f"• {posted} записей в архиве объявлений\n"
-        f"• {avail} непроданных автомобилей\n\n"
-        f"Авто-постер начнёт генерировать новые объявления.", parse_mode="HTML",
+        "🗑 Очищено:\n" + "\n".join(parts) + "\n\n"
+        "Авто-постер начнёт генерировать новые объявления.", parse_mode="HTML",
     )
 
 
