@@ -20,7 +20,7 @@ from database import (
     update_balance,
     add_transaction,
 )
-from database import get_job_category, is_job_taken
+from database import get_job_category, is_job_taken, get_businesses_by_manager
 from utils import format_amount, parse_amount, is_admin, resolve_target
 
 router = Router()
@@ -318,21 +318,42 @@ async def cmd_pay_salary(message: Message):
         if target_id is None:
             not_found.append(arg)
             continue
+
+        # Regular job salary (from thin air)
         job = await get_user_job_info(target_id, message.chat.id)
+        if job and job["salary"] > 0:
+            await update_balance(target_id, job["salary"], message.chat.id)
+            await add_transaction("salary", None, target_id, job["salary"],
+                                  f"Зарплата за сессию: {job['name']} — {format_amount(job['salary'])}")
+            paid.append(f"{target_name} ({job['name']}) — {format_amount(job['salary'])}")
+
+        # Business manager salary (from owner's pocket)
+        biz_list = await get_businesses_by_manager(target_id)
+        for biz in biz_list:
+            salary = biz.get("manager_salary", 0)
+            owner_id = biz.get("owner_telegram_id")
+            if salary <= 0 or not owner_id:
+                continue
+            if not await update_balance(owner_id, -salary, message.chat.id):
+                not_found.append(f"{target_name} (📛 {biz['type_name']} — у владельца нет ${salary:,})")
+                continue
+            await update_balance(target_id, salary, message.chat.id)
+            await add_transaction("manager_salary", None, target_id, salary,
+                                  f"Зарплата менеджера: {biz['type_name']}")
+            await add_transaction("manager_salary_paid", None, owner_id, -salary,
+                                  f"Выплата менеджеру {target_name} за {biz['type_name']}")
+            paid.append(f"{target_name} (👔 {biz['type_name']}) — {format_amount(salary)}")
+
         if not job or job["salary"] <= 0:
-            not_found.append(target_name)
-            continue
-        await update_balance(target_id, job["salary"], message.chat.id)
-        await add_transaction("salary", None, target_id, job["salary"],
-                              f"Зарплата за сессию: {job['name']} — {format_amount(job['salary'])}")
-        paid.append(f"{target_name} ({job['name']}) — {format_amount(job['salary'])}")
+            if not biz_list:
+                not_found.append(target_name)
 
     lines = [f"💵 <b>Выплата зарплаты за сессию</b>\n"]
     if paid:
         lines.append("✅ <b>Получили:</b>")
         lines.extend(f"  • {p}" for p in paid)
     if not_found:
-        lines.append(f"\n❌ <b>Не найдены/без работы:</b>")
+        lines.append(f"\n❌ <b>Не найдены/без работы/ошибки:</b>")
         lines.extend(f"  • {n}" for n in not_found)
     if not paid and not not_found:
         lines.append("Нет пользователей для выплаты")

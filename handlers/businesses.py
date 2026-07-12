@@ -18,9 +18,9 @@ from database import (
     get_all_business_types,
     get_business_type,
     set_business_manager,
-    record_business_delivery,
     get_business_profit,
-    purchase_business_materials,
+    order_business_materials,
+    confirm_business_delivery,
     update_balance,
     add_transaction,
     pay_from_org,
@@ -245,18 +245,22 @@ async def cmd_business_info(message: Message):
     cat = b.get("category", "")
     materials = b.get("materials", 0)
     max_mat = b.get("max_materials", 100)
+    pending = b.get("pending_supplies", 0)
     is_open = b.get("is_open", "1")
     open_status = "✅ Открыт" if is_open == "1" else "❌ Закрыт"
     mat_bar = "█" * (materials // max(1, max_mat // 10)) + "░" * (10 - materials // max(1, max_mat // 10))
     mat_cost = b.get("materials_cost", 100)
+    mgr_salary = b.get("manager_salary", 0)
+    salary_line = f" | 💵 ${mgr_salary:,}/сессия" if mgr_salary else ""
+    pending_line = f"\n⏳ Ожидает доставки: {pending}" if pending else ""
     await message.reply(
         f"🏪 <b>{b['type_name']}</b>\n"
         f"📂 Категория: {cat}\n"
         f"💰 Цена: ${b['price']:,}\n"
         f"{profit_line}"
-        f"{mgr_line}"
+        f"{mgr_line}{salary_line}"
         f"🚚 Доставок: {b.get('delivery_count', 0)}\n"
-        f"📦 Материалы: {materials}/{max_mat} {mat_bar}\n"
+        f"📦 Материалы: {materials}/{max_mat} {mat_bar}{pending_line}\n"
         f"💵 Стоимость ед. материалов: ${mat_cost:,}\n"
         f"{open_status}\n"
         f"📌 Статус: {owner}",
@@ -463,14 +467,15 @@ async def cmd_unlist_business(message: Message):
 @router.message(Command("бизнес_менеджер", prefix="!/"))
 async def cmd_business_manager(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
-    args = message.text.split(maxsplit=2)
-    if len(args) < 2:
-        await message.reply("❌ Использование: <code>!бизнес_менеджер НОМЕР [@user]</code>\n"
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.reply("❌ Использование: <code>!бизнес_менеджер НОМЕР [@user] [зарплата]</code>\n"
                            "С @user — назначить менеджера\n"
+                           "С @user и зарплатой — назначить с окладом\n"
                            "Без @user — снять менеджера", parse_mode="HTML")
         return
     try:
-        pos = int(args[1])
+        pos = int(parts[1])
     except ValueError:
         await message.reply("❌ Номер должен быть числом")
         return
@@ -484,18 +489,27 @@ async def cmd_business_manager(message: Message):
         await message.reply("❌ Это не ваш бизнес")
         return
 
-    if len(args) >= 3:
-        target_id, target_name, target_username, hint = await resolve_target(message, args)
+    if len(parts) >= 3:
+        salary = 0
+        target_raw = parts[2]
+        if len(parts) >= 4:
+            try:
+                salary = max(0, int(parts[3]))
+            except ValueError:
+                await message.reply("❌ Зарплата должна быть числом")
+                return
+        target_id, target_name, target_username, hint = await resolve_target(message, [target_raw])
         if not target_id:
             await message.reply(hint or "❌ Пользователь не найден")
             return
         await get_or_create_user(target_id, target_username, target_name, chat_id=message.chat.id)
-        ok = await set_business_manager(b["id"], target_id, message.chat.id)
+        ok = await set_business_manager(b["id"], target_id, message.chat.id, salary)
         if not ok:
             await message.reply("❌ Ошибка назначения менеджера")
             return
+        salary_text = f" с окладом ${salary:,}" if salary else ""
         await message.reply(
-            f"✅ Менеджером <b>{b['type_name']}</b> назначен {target_name}",
+            f"✅ Менеджером <b>{b['type_name']}</b> назначен {target_name}{salary_text}",
             parse_mode="HTML",
         )
     else:
@@ -506,12 +520,12 @@ async def cmd_business_manager(message: Message):
         await message.reply(f"✅ Менеджер <b>{b['type_name']}</b> снят", parse_mode="HTML")
 
 
-@router.message(Command("доставка_бизнеса", prefix="!/"))
-async def cmd_business_delivery(message: Message):
+@router.message(Command("доставить_сырьё", prefix="!/"))
+async def cmd_confirm_materials(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!доставка_бизнеса НОМЕР</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!доставить_сырьё НОМЕР</code>", parse_mode="HTML")
         return
     try:
         pos = int(args[1])
@@ -525,32 +539,31 @@ async def cmd_business_delivery(message: Message):
         return
     b = businesses[pos - 1]
 
-    if b.get("manager_telegram_id") and b["manager_telegram_id"] != message.from_user.id and b["owner_telegram_id"] != message.from_user.id:
-        await message.reply("❌ Вы не являетесь менеджером этого бизнеса")
+    if b.get("manager_telegram_id") != message.from_user.id:
+        await message.reply("❌ Только менеджер может подтвердить доставку")
         return
 
-    ok, err_msg = await record_business_delivery(b["id"])
+    ok, err_msg = await confirm_business_delivery(b["id"], message.from_user.id)
     if not ok:
         await message.reply(err_msg, parse_mode="HTML")
         return
 
-    profit = await get_business_profit(b["id"])
-    remaining = b.get("materials", 0) - 1
+    pending = b.get("pending_supplies", 0)
+    new_mat = b.get("materials", 0) + pending
     await message.reply(
-        f"✅ Доставка записана для <b>{b['type_name']}</b>!\n"
-        f"🚚 Всего доставок: {b.get('delivery_count', 0) + 1}\n"
-        f"💰 Прибыль за доставку: ${profit:,}\n"
-        f"📦 Осталось материалов: {remaining}",
+        f"✅ Доставка подтверждена для <b>{b['type_name']}</b>!\n"
+        f"📦 Добавлено материалов: <b>{pending}</b>\n"
+        f"📊 Всего материалов: {new_mat}",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("закупить_бизнес", prefix="!/"))
-async def cmd_business_purchase_materials(message: Message):
+@router.message(Command("заказать_сырьё", prefix="!/"))
+async def cmd_order_materials(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
     args = message.text.split(maxsplit=2)
     if len(args) < 2:
-        await message.reply("❌ Использование: <code>!закупить_бизнес НОМЕР [количество]</code>", parse_mode="HTML")
+        await message.reply("❌ Использование: <code>!заказать_сырьё НОМЕР [количество]</code>", parse_mode="HTML")
         return
     try:
         pos = int(args[1])
@@ -567,6 +580,10 @@ async def cmd_business_purchase_materials(message: Message):
         await message.reply("❌ Это не ваш бизнес")
         return
 
+    if b.get("manager_telegram_id") is None:
+        await message.reply("❌ Сначала назначьте менеджера")
+        return
+
     amount = 10
     if len(args) >= 3:
         try:
@@ -578,7 +595,7 @@ async def cmd_business_purchase_materials(message: Message):
         await message.reply("❌ Количество должно быть положительным")
         return
 
-    ok, bought, cost = await purchase_business_materials(b["id"], amount)
+    ok, cost = await order_business_materials(b["id"], amount)
     if not ok:
         await message.reply("❌ Склад уже полон или бизнес не найден")
         return
@@ -587,13 +604,14 @@ async def cmd_business_purchase_materials(message: Message):
         await message.reply(f"❌ Недостаточно средств. Нужно ${cost:,}", parse_mode="HTML")
         return
 
-    unit_cost = cost // bought if bought else 0
+    unit_cost = cost // amount if amount else 0
     await add_transaction("business_materials", None, message.from_user.id, -cost,
-                          f"Закупка материалов для #{b['id']} {b['type_name']} ({bought} ед.)")
+                          f"Заказ сырья для #{b['id']} {b['type_name']} ({amount} ед.)")
     await message.reply(
-        f"✅ Закуплено <b>{bought}</b> ед. материалов для <b>{b['type_name']}</b>\n"
+        f"✅ Заказано <b>{amount}</b> ед. сырья для <b>{b['type_name']}</b>\n"
         f"💵 Цена за ед.: ${unit_cost:,}\n"
-        f"💰 Итого: ${cost:,}",
+        f"💰 Итого: ${cost:,}\n"
+        f"⏳ Ожидает подтверждения менеджером",
         parse_mode="HTML",
     )
 

@@ -313,7 +313,7 @@ async def init_db():
             await conn.execute("ALTER TABLE houses ADD COLUMN org_id BIGINT DEFAULT NULL")
         except Exception:
             pass
-        for col, default in (("delivery_count", 0), ("total_profit_earned", 0), ("materials", 0), ("max_materials", 100), ("materials_cost", 0), ("total_customers", 0), ("manager_salary", 0)):
+        for col, default in (("delivery_count", 0), ("total_profit_earned", 0), ("materials", 0), ("max_materials", 100), ("materials_cost", 0), ("total_customers", 0), ("manager_salary", 0), ("pending_supplies", 0)):
             try:
                 await conn.execute(f"ALTER TABLE businesses ADD COLUMN {col} INTEGER DEFAULT {default}")
             except Exception:
@@ -604,7 +604,8 @@ async def init_db():
             for col in ("delivery_count INTEGER DEFAULT 0", "total_profit_earned INTEGER DEFAULT 0",
                          "materials INTEGER DEFAULT 0", "max_materials INTEGER DEFAULT 100",
                          "materials_cost INTEGER DEFAULT 0", "total_customers INTEGER DEFAULT 0",
-                         "manager_salary INTEGER DEFAULT 0", "is_open TEXT DEFAULT '1'"):
+                         "manager_salary INTEGER DEFAULT 0", "pending_supplies INTEGER DEFAULT 0",
+                         "is_open TEXT DEFAULT '1'"):
                 try:
                     await conn.execute(f"ALTER TABLE businesses ADD COLUMN {col}")
                     await conn.commit()
@@ -4461,22 +4462,41 @@ async def get_business_type_by_name(name: str) -> dict | None:
         await conn.close()
 
 
-async def set_business_manager(business_id: int, manager_id: int | None, chat_id: int = 0) -> bool:
+async def set_business_manager(business_id: int, manager_id: int | None, chat_id: int = 0, salary: int = 0) -> bool:
     conn = await get_conn()
     try:
         if _is_pg:
             result = await conn.execute(
-                "UPDATE businesses SET manager_telegram_id = $1 WHERE id = $2",
-                manager_id, business_id,
+                "UPDATE businesses SET manager_telegram_id = $1, manager_salary = $2 WHERE id = $3",
+                manager_id, salary, business_id,
             )
             return "UPDATE 1" in (result or "")
         else:
             cursor = await conn.execute(
-                "UPDATE businesses SET manager_telegram_id = ? WHERE id = ?",
-                (manager_id, business_id),
+                "UPDATE businesses SET manager_telegram_id = ?, manager_salary = ? WHERE id = ?",
+                (manager_id, salary, business_id),
             )
             await conn.commit()
             return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def get_businesses_by_manager(manager_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                BUSINESS_SELECT + " WHERE b.manager_telegram_id = $1 AND b.manager_salary > 0",
+                manager_id,
+            )
+        else:
+            cursor = await conn.execute(
+                BUSINESS_SELECT + " WHERE b.manager_telegram_id = ? AND b.manager_salary > 0",
+                (manager_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
 
@@ -4599,5 +4619,151 @@ async def purchase_business_materials(business_id: int, amount: int) -> tuple[bo
             )
             await conn.commit()
             return True, can_buy, total_cost
+    finally:
+        await conn.close()
+
+
+async def order_business_materials(business_id: int, amount: int) -> tuple[bool, int]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT materials_cost, max_materials, pending_supplies FROM businesses WHERE id = $1 FOR UPDATE",
+                business_id,
+            )
+            if not row:
+                return False, 0
+            max_mat = row["max_materials"] or 100
+            pending = row["pending_supplies"] or 0
+            cost_per_unit = row["materials_cost"] or 0
+            space = max_mat - pending
+            if space <= 0:
+                return False, 0
+            can_buy = min(amount, space)
+            total = can_buy * cost_per_unit
+            await conn.execute(
+                "UPDATE businesses SET pending_supplies = pending_supplies + $1 WHERE id = $2",
+                can_buy, business_id,
+            )
+            return True, total
+        else:
+            cursor = await conn.execute(
+                "SELECT materials_cost, max_materials, pending_supplies FROM businesses WHERE id = ?",
+                (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False, 0
+            max_mat = row["max_materials"] or 100
+            pending = row["pending_supplies"] or 0
+            cost_per_unit = row["materials_cost"] or 0
+            space = max_mat - pending
+            if space <= 0:
+                return False, 0
+            can_buy = min(amount, space)
+            total = can_buy * cost_per_unit
+            await conn.execute(
+                "UPDATE businesses SET pending_supplies = pending_supplies + ? WHERE id = ?",
+                (can_buy, business_id),
+            )
+            await conn.commit()
+            return True, total
+    finally:
+        await conn.close()
+
+
+async def confirm_business_delivery(business_id: int, manager_id: int) -> tuple[bool, str]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT pending_supplies, manager_telegram_id, is_open FROM businesses WHERE id = $1 FOR UPDATE",
+                business_id,
+            )
+            if not row:
+                return False, "❌ Бизнес не найден"
+            if row["manager_telegram_id"] != manager_id:
+                return False, "❌ Вы не менеджер этого бизнеса"
+            pending = row["pending_supplies"] or 0
+            if pending <= 0:
+                return False, "❌ Нет ожидающих поставок"
+            await conn.execute(
+                "UPDATE businesses SET materials = materials + $1, pending_supplies = 0, is_open = '1' WHERE id = $2",
+                pending, business_id,
+            )
+            return True, ""
+        else:
+            cursor = await conn.execute(
+                "SELECT pending_supplies, manager_telegram_id, is_open FROM businesses WHERE id = ?",
+                (business_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False, "❌ Бизнес не найден"
+            if row["manager_telegram_id"] != manager_id:
+                return False, "❌ Вы не менеджер этого бизнеса"
+            pending = row["pending_supplies"] or 0
+            if pending <= 0:
+                return False, "❌ Нет ожидающих поставок"
+            await conn.execute(
+                "UPDATE businesses SET materials = materials + ?, pending_supplies = 0, is_open = '1' WHERE id = ?",
+                (pending, business_id),
+            )
+            await conn.commit()
+            return True, ""
+    finally:
+        await conn.close()
+
+
+async def process_business_profit_tick() -> int:
+    conn = await get_conn()
+    total = 0
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT id, profit, owner_telegram_id FROM businesses WHERE is_open = '1' AND materials > 0 FOR UPDATE"
+            )
+            for row in rows:
+                profit = row["profit"] or 0
+                if profit <= 0 or not row["owner_telegram_id"]:
+                    continue
+                await conn.execute(
+                    "UPDATE businesses SET materials = materials - 1, delivery_count = delivery_count + 1, "
+                    "total_profit_earned = total_profit_earned + $1 WHERE id = $2",
+                    profit, row["id"],
+                )
+                await conn.execute(
+                    "UPDATE users SET balance = balance + $1 WHERE telegram_id = $2",
+                    profit, row["owner_telegram_id"],
+                )
+                total += profit
+            if rows:
+                await conn.execute(
+                    "UPDATE businesses SET is_open = '0' WHERE is_open = '1' AND materials <= 0"
+                )
+        else:
+            cursor = await conn.execute(
+                "SELECT id, profit, owner_telegram_id FROM businesses WHERE is_open = '1' AND materials > 0"
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                profit = row["profit"] or 0
+                if profit <= 0 or not row["owner_telegram_id"]:
+                    continue
+                await conn.execute(
+                    "UPDATE businesses SET materials = materials - 1, delivery_count = delivery_count + 1, "
+                    "total_profit_earned = total_profit_earned + ? WHERE id = ?",
+                    (profit, row["id"]),
+                )
+                await conn.execute(
+                    "UPDATE users SET balance = balance + ? WHERE telegram_id = ?",
+                    (profit, row["owner_telegram_id"]),
+                )
+                total += profit
+            await conn.execute(
+                "UPDATE businesses SET is_open = '0' WHERE is_open = '1' AND materials <= 0"
+            )
+            await conn.commit()
+        return total
     finally:
         await conn.close()
