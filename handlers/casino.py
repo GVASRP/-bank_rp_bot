@@ -40,11 +40,6 @@ async def get_jackpot() -> int:
     return int(raw) if raw else 0
 
 
-async def get_max_bet() -> int:
-    raw = await get_config("casino_max_bet")
-    return int(raw) if raw else 100_000
-
-
 async def get_cooldown() -> float:
     raw = await get_config("casino_cooldown")
     return float(raw) if raw else 3.0
@@ -72,15 +67,13 @@ async def deduct_jackpot_fund(loss: int):
 @router.message(Command("казино", prefix="!/"))
 async def cmd_casino(message: Message):
     jackpot = await get_jackpot()
-    max_bet = await get_max_bet()
     await message.reply(
         f"🎰 <b>Казино GreenVegas</b>\n\n"
         f"━━ <b>Игры</b> ━━\n"
-        f"🪙 <code>!монетка N СТАВКА</code> — орёл/решка (x2, шанс 50%)\n"
-        f"🎲 <code>!кости N СТАВКА</code> — угадай число (x6, шанс 16.6%)\n"
-        f"🎰 <code>!слот N СТАВКА</code> — слот (x5..x50 + джекпот)\n\n"
+        f"🪙 <code>!монетка 1/2 СТАВКА</code> — орёл/решка (x2, шанс 50%)\n"
+        f"🎲 <code>!кости 1-6 СТАВКА</code> — угадай число (x6, шанс 16.6%)\n"
+        f"🎰 <code>!слот СТАВКА</code> — слот (x5..x50 + джекпот)\n\n"
         f"━━ <b>Правила</b> ━━\n"
-        f"📌 Макс. ставка: ${max_bet:,}\n"
         f"💎 Джекпот: ${jackpot:,}\n"
         f"📊 {JACKPOT_FUND_PCT}% каждого проигрыша уходит в джекпот\n"
         f"⏳ Задержка между ставками: {await get_cooldown():.0f} сек",
@@ -110,9 +103,8 @@ async def cmd_coinflip(message: Message):
     if choice not in (1, 2):
         await message.reply("❌ 1 — орёл, 2 — решка")
         return
-    max_bet = await get_max_bet()
-    if bet < 1 or bet > max_bet:
-        await message.reply(f"❌ Ставка от $1 до ${max_bet:,}", parse_mode="HTML")
+    if bet < 1:
+        await message.reply("❌ Ставка должна быть положительной")
         return
 
     if not await update_balance(uid, -bet, message.chat.id):
@@ -168,9 +160,8 @@ async def cmd_dice(message: Message):
     if choice < 1 or choice > 6:
         await message.reply("❌ Выберите число от 1 до 6")
         return
-    max_bet = await get_max_bet()
-    if bet < 1 or bet > max_bet:
-        await message.reply(f"❌ Ставка от $1 до ${max_bet:,}", parse_mode="HTML")
+    if bet < 1:
+        await message.reply("❌ Ставка должна быть положительной")
         return
 
     if not await update_balance(uid, -bet, message.chat.id):
@@ -222,9 +213,8 @@ async def cmd_slot(message: Message):
     except ValueError:
         await message.reply("❌ Ставка должна быть числом")
         return
-    max_bet = await get_max_bet()
-    if bet < 1 or bet > max_bet:
-        await message.reply(f"❌ Ставка от $1 до ${max_bet:,}", parse_mode="HTML")
+    if bet < 1:
+        await message.reply("❌ Ставка должна быть положительной")
         return
 
     if not await update_balance(uid, -bet, message.chat.id):
