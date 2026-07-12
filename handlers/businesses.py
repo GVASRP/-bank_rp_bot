@@ -179,6 +179,34 @@ async def my_biz_page_cb(query: CallbackQuery):
         await query.answer(f"❌ {e}", show_alert=True)
 
 
+@router.message(Command("бизнесы_помощь", prefix="!/"))
+async def cmd_business_help(message: Message):
+    await message.reply(
+        "🏪 <b>Система бизнесов</b>\n\n"
+        "━━ <b>Покупка/продажа</b> ━━\n"
+        "🏪 <code>!бизнесы</code> — список в продаже\n"
+        "ℹ️ <code>!бизнес N</code> — детали бизнеса\n"
+        "🛒 <code>!купить_бизнес N</code> — купить\n"
+        "🏘️ <code>!мои_бизнесы</code> — мои бизнесы\n"
+        "💲 <code>!продать_бизнес N</code> — слить в гос (60%)\n"
+        "🏷 <code>!продать_бизнес N цена</code> — выставить игрокам\n"
+        "🚫 <code>!снять_продажу_бизнеса N</code>\n\n"
+        "━━ <b>Работа бизнеса</b> ━━\n"
+        "💵 Прибыль начисляется автоматически каждую минуту, пока есть сырьё\n"
+        "📦 Когда сырьё заканчивается — бизнес закрывается\n\n"
+        "━━ <b>Сырьё</b> ━━\n"
+        "1️⃣ Владелец: <code>!заказать_сырьё N [кол-во]</code> — оплатить\n"
+        "2️⃣ Менеджер: <code>!доставить_сырьё N</code> — подтвердить доставку\n\n"
+        "━━ <b>Менеджер</b> ━━\n"
+        "👤 <code>!бизнес_менеджер N @user [зарплата]</code> — назначить\n"
+        "💸 Зарплата выплачивается админом через <code>!зп @users</code>\n"
+        "   — деньги снимаются с владельца бизнеса\n\n"
+        "━━ <b>Контейнер</b> ━━\n"
+        "🎁 <code>!контейнер_бизнес</code> — купить случайный бизнес",
+        parse_mode="HTML",
+    )
+
+
 @router.message(Command("бизнесы", prefix="!/"))
 async def cmd_businesses(message: Message):
     await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)

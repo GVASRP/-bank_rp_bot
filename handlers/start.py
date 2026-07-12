@@ -73,7 +73,7 @@ async def cmd_start(message: Message):
         "🚫 <code>!снять_продажу_прицепа ID</code> / 🎁 <code>!контейнер_прицеп</code>\n\n"
 
         "━━━ 🔹 <b>БИЗНЕСЫ</b> ━━━\n"
-        "🏪 <code>!бизнесы</code> / ℹ️ <code>!бизнес N</code>\n"
+        "🏪 <code>!бизнесы</code> / ℹ️ <code>!бизнес N</code> / ❓ <code>!бизнесы_помощь</code>\n"
         "🛒 <code>!купить_бизнес N</code> / 🏘️ <code>!мои_бизнесы</code>\n"
         "💲 <code>!продать_бизнес N</code> / 🏷 <code>!продать_бизнес N цена</code>\n"
         "🚫 <code>!снять_продажу_бизнеса N</code> / 🎁 <code>!контейнер_бизнес</code>\n"
