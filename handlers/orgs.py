@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from database import (
+    get_or_create_user,
     create_org,
     get_org,
     get_user_orgs,
@@ -18,8 +19,9 @@ from database import (
     get_org_houses,
     get_org_trailers,
     delete_org,
+    force_delete_org,
 )
-from utils import format_amount, parse_amount, resolve_target
+from utils import format_amount, parse_amount, resolve_target, is_admin
 
 router = Router()
 
@@ -411,4 +413,33 @@ async def cmd_org_trailers(message: Message):
     lines = [f"🏢 <b>{org['name']}</b> — прицепы:\n"]
     for idx, t in enumerate(trailers, 1):
         lines.append(f"#{idx} {t['year']} {t['make']} {t['model']} — ${t['price']:,}")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("удалить_орг_полностью", prefix="!/"))
+async def cmd_force_delete_org(message: Message):
+    await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
+    if not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("❌ Использование: <code>!удалить_орг_полностью ID</code>", parse_mode="HTML")
+        return
+    try:
+        org_id = int(args[1])
+    except ValueError:
+        await message.reply("❌ ID должен быть числом")
+        return
+    result = await force_delete_org(org_id)
+    if not result["ok"]:
+        await message.reply(f"❌ {result['error']}")
+        return
+    c = result["counts"]
+    lines = [
+        f"✅ Организация <b>{result['org_name']}</b> полностью удалена",
+        f"💵 Баланс: ${result['balance_lost']:,}",
+        f"🚗 Авто: {c['cars']} | 🚛 Прицепы: {c['trailers']} | 🏠 Дома: {c['houses']} | 🏪 Бизнесы: {c['businesses']}",
+        f"\n<i>Всё имущество возвращено в свободную продажу</i>",
+    ]
     await message.reply("\n".join(lines), parse_mode="HTML")

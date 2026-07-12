@@ -3969,6 +3969,65 @@ async def delete_org(org_id: int) -> bool:
         await conn.close()
 
 
+async def force_delete_org(org_id: int) -> dict:
+    conn = await get_conn()
+    try:
+        org = await get_org(org_id)
+        if not org:
+            return {"ok": False, "error": "Организация не найдена"}
+
+        if _is_pg:
+            rows = await conn.fetch("SELECT vehicle_type FROM vehicles WHERE org_id = $1 AND status = 'sold'", org_id)
+            cars = sum(1 for r in rows if r["vehicle_type"] == "car")
+            trailers = sum(1 for r in rows if r["vehicle_type"] == "trailer")
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE org_id = $1", org_id)
+
+            rows = await conn.fetch("SELECT id FROM houses WHERE org_id = $1 AND status = 'sold'", org_id)
+            houses = len(rows)
+            await conn.execute("UPDATE houses SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE org_id = $1", org_id)
+
+            rows = await conn.fetch("SELECT id FROM businesses WHERE org_id = $1", org_id)
+            businesses = len(rows)
+            await conn.execute("UPDATE businesses SET org_id = NULL WHERE org_id = $1", org_id)
+
+            await conn.execute("DELETE FROM org_members WHERE org_id = $1", org_id)
+            await conn.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        else:
+            cursor = await conn.execute("SELECT vehicle_type FROM vehicles WHERE org_id = ? AND status = 'sold'", (org_id,))
+            rows = await cursor.fetchall()
+            cars = sum(1 for r in rows if r["vehicle_type"] == "car")
+            trailers = sum(1 for r in rows if r["vehicle_type"] == "trailer")
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE org_id = ?", (org_id,))
+
+            cursor = await conn.execute("SELECT id FROM houses WHERE org_id = ? AND status = 'sold'", (org_id,))
+            rows = await cursor.fetchall()
+            houses = len(rows)
+            await conn.execute("UPDATE houses SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE org_id = ?", (org_id,))
+
+            cursor = await conn.execute("SELECT id FROM businesses WHERE org_id = ?", (org_id,))
+            rows = await cursor.fetchall()
+            businesses = len(rows)
+            await conn.execute("UPDATE businesses SET org_id = NULL WHERE org_id = ?", (org_id,))
+
+            await conn.execute("DELETE FROM org_members WHERE org_id = ?", (org_id,))
+            cursor = await conn.execute("DELETE FROM organizations WHERE id = ?", (org_id,))
+            await conn.commit()
+
+        return {
+            "ok": True,
+            "org_name": org["name"],
+            "balance_lost": org.get("balance", 0),
+            "counts": {
+                "cars": cars,
+                "trailers": trailers,
+                "houses": houses,
+                "businesses": businesses,
+            },
+        }
+    finally:
+        await conn.close()
+
+
 async def transfer_asset(item_type: str, item_id: int, new_owner_id: int | None = None, new_org_id: int | None = None, chat_id: int = 0) -> bool:
     conn = await get_conn()
     try:
