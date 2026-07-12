@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from config import BOT_TOKEN, BOT_PROXY
-from database import set_config
+from database import set_config, get_or_create_user, set_balance
 from database import init_db, close_conn
 from handlers import router
 from auto_poster import auto_poster_loop
@@ -37,6 +37,15 @@ async def on_startup(bot):
     logger.info("Auto-poster: creating background task")
     asyncio.create_task(auto_poster_loop(bot))
     await set_config("container_min_boost", "0")
+
+    bot_me = await bot.get_me()
+    bot_id = bot_me.id
+    existing = await get_or_create_user(bot_id, bot_me.username or "", bot_me.first_name or "", 0)
+    if existing and existing.get("balance", 0) == 0:
+        await set_balance(bot_id, 50000, 0)
+        logger.info("Bot user @%s (id=%d) registered with starting balance", bot_me.username, bot_id)
+    else:
+        logger.info("Bot user @%s (id=%d) already registered, balance=%s", bot_me.username, bot_id, existing.get("balance", 0) if existing else "?")
 
 
 async def main():
