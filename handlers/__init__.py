@@ -8,6 +8,7 @@ from .fuel import router as fuel_router
 from .trailers import router as trailer_router
 from .orgs import router as org_router
 from .businesses import router as businesses_router
+from .casino import router as casino_router
 
 router = Router()
-router.include_routers(start_router, user_router, admin_router, game_router, salary_router, fuel_router, trailer_router, org_router, businesses_router)
+router.include_routers(start_router, user_router, admin_router, game_router, salary_router, fuel_router, trailer_router, org_router, businesses_router, casino_router)
