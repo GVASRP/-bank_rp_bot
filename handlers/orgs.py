@@ -6,6 +6,7 @@ from database import (
     get_or_create_user,
     create_org,
     get_org,
+    get_all_orgs,
     get_user_orgs,
     update_org_balance,
     add_org_member,
@@ -442,4 +443,25 @@ async def cmd_force_delete_org(message: Message):
         f"🚗 Авто: {c['cars']} | 🚛 Прицепы: {c['trailers']} | 🏠 Дома: {c['houses']} | 🏪 Бизнесы: {c['businesses']}",
         f"\n<i>Всё имущество возвращено в свободную продажу</i>",
     ]
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("список_организаций", prefix="!/"))
+async def cmd_list_all_orgs(message: Message):
+    await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
+    if not await is_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Только для администраторов")
+        return
+    orgs = await get_all_orgs()
+    if not orgs:
+        await message.reply("📭 Нет организаций")
+        return
+    lines = [f"📋 <b>Все организации</b> (всего {len(orgs)})\n"]
+    for o in orgs:
+        lines.append(
+            f"<b>#{o['id']}</b> {o['name']} | "
+            f"👤 влад: <code>{o['owner_telegram_id']}</code> | "
+            f"👥 {o['member_count']} уч. | "
+            f"💰 ${o['balance']:,}"
+        )
     await message.reply("\n".join(lines), parse_mode="HTML")

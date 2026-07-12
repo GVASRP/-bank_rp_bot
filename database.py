@@ -3807,6 +3807,21 @@ async def get_org(org_id: int) -> dict | None:
         await conn.close()
 
 
+async def get_all_orgs() -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch("SELECT o.*, (SELECT COUNT(*) FROM org_members WHERE org_id = o.id) as member_count FROM organizations o ORDER BY o.id")
+        else:
+            cursor = await conn.execute(
+                "SELECT o.*, (SELECT COUNT(*) FROM org_members WHERE org_id = o.id) as member_count FROM organizations o ORDER BY o.id",
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 async def get_user_orgs(telegram_id: int) -> list:
     conn = await get_conn()
     try:
