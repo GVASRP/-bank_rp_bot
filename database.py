@@ -324,6 +324,34 @@ async def init_db():
             except Exception:
                 pass
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS betting_events (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL DEFAULT 0,
+                title TEXT NOT NULL,
+                status TEXT DEFAULT 'open',
+                commission_pct INTEGER DEFAULT 5,
+                created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+                settled_at TEXT
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS betting_options (
+                id SERIAL PRIMARY KEY,
+                event_id INTEGER NOT NULL REFERENCES betting_events(id),
+                label TEXT NOT NULL,
+                is_winner BOOLEAN DEFAULT FALSE
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bets (
+                id SERIAL PRIMARY KEY,
+                event_id INTEGER NOT NULL REFERENCES betting_events(id),
+                option_id INTEGER NOT NULL REFERENCES betting_options(id),
+                user_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS job_roles (
                 id SERIAL PRIMARY KEY,
                 chat_id BIGINT NOT NULL DEFAULT 0,
@@ -540,6 +568,34 @@ async def init_db():
                     manager_telegram_id INTEGER,
                     last_delivery TEXT,
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS betting_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    title TEXT NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    commission_pct INTEGER DEFAULT 5,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    settled_at TEXT
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS betting_options (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    is_winner INTEGER DEFAULT 0
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER NOT NULL,
+                    option_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL
                 )
             """)
             try:
@@ -4782,5 +4838,326 @@ async def process_business_profit_tick() -> int:
             )
             await conn.commit()
         return total
+    finally:
+        await conn.close()
+
+
+
+# ── Betting functions ──
+
+async def create_betting_event(chat_id: int, title: str, commission_pct: int = 5) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO betting_events (chat_id, title, commission_pct) VALUES ($1, $2, $3) RETURNING id",
+                chat_id, title, commission_pct,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO betting_events (chat_id, title, commission_pct) VALUES (?, ?, ?)",
+                (chat_id, title, commission_pct),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        await conn.close()
+
+
+async def get_betting_event(event_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM betting_events WHERE id = $1", event_id)
+        else:
+            cursor = await conn.execute("SELECT * FROM betting_events WHERE id = ?", (event_id,))
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_active_betting_events(chat_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM betting_events WHERE chat_id = $1 AND status IN ('open', 'closed') ORDER BY created_at DESC",
+                chat_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM betting_events WHERE chat_id = ? AND status IN ('open', 'closed') ORDER BY created_at DESC",
+                (chat_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def set_betting_event_status(event_id: int, status: str) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("UPDATE betting_events SET status = $1 WHERE id = $2", status, event_id)
+            return "UPDATE 1" in (result or "")
+        else:
+            cursor = await conn.execute("UPDATE betting_events SET status = ? WHERE id = ?", (status, event_id))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def add_betting_option(event_id: int, label: str) -> int:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO betting_options (event_id, label) VALUES ($1, $2) RETURNING id",
+                event_id, label,
+            )
+            return row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO betting_options (event_id, label) VALUES (?, ?)",
+                (event_id, label),
+            )
+            await conn.commit()
+            return cursor.lastrowid
+    finally:
+        await conn.close()
+
+
+async def get_betting_options(event_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM betting_options WHERE event_id = $1 ORDER BY id", event_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM betting_options WHERE event_id = ? ORDER BY id", (event_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def set_winning_option(event_id: int, option_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute("UPDATE betting_options SET is_winner = FALSE WHERE event_id = $1", event_id)
+            result = await conn.execute("UPDATE betting_options SET is_winner = TRUE WHERE id = $1 AND event_id = $2", option_id, event_id)
+            return "UPDATE 1" in (result or "")
+        else:
+            await conn.execute("UPDATE betting_options SET is_winner = 0 WHERE event_id = ?", (event_id,))
+            cursor = await conn.execute("UPDATE betting_options SET is_winner = 1 WHERE id = ? AND event_id = ?", (option_id, event_id))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def place_bet(event_id: int, option_id: int, user_id: int, amount: int) -> tuple[bool, str]:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            ev = await conn.fetchrow("SELECT status FROM betting_events WHERE id = $1 FOR UPDATE", event_id)
+            if not ev:
+                return False, "❌ Событие не найдено"
+            if ev["status"] != "open":
+                return False, "❌ Приём ставок закрыт"
+            opt = await conn.fetchrow("SELECT id FROM betting_options WHERE id = $1 AND event_id = $2", option_id, event_id)
+            if not opt:
+                return False, "❌ Исход не найден"
+            await conn.execute(
+                "INSERT INTO bets (event_id, option_id, user_id, amount) VALUES ($1, $2, $3, $4)",
+                event_id, option_id, user_id, amount,
+            )
+        else:
+            cursor = await conn.execute("SELECT status FROM betting_events WHERE id = ?", (event_id,))
+            ev = await cursor.fetchone()
+            if not ev:
+                return False, "❌ Событие не найдено"
+            if ev["status"] != "open":
+                return False, "❌ Приём ставок закрыт"
+            cursor = await conn.execute("SELECT id FROM betting_options WHERE id = ? AND event_id = ?", (option_id, event_id))
+            opt = await cursor.fetchone()
+            if not opt:
+                return False, "❌ Исход не найден"
+            await conn.execute(
+                "INSERT INTO bets (event_id, option_id, user_id, amount) VALUES (?, ?, ?, ?)",
+                (event_id, option_id, user_id, amount),
+            )
+            await conn.commit()
+        return True, ""
+    finally:
+        await conn.close()
+
+
+async def settle_betting_event(event_id: int) -> dict:
+    conn = await get_conn()
+    try:
+        ev = await get_betting_event(event_id)
+        if not ev:
+            return {"ok": False, "error": "Событие не найдено"}
+        if ev["status"] == "settled":
+            return {"ok": False, "error": "Событие уже рассчитано"}
+        options = await get_betting_options(event_id)
+        winner = [o for o in options if o.get("is_winner") or o.get("is_winner") == 1]
+        if not winner:
+            return {"ok": False, "error": "Не указан победитель"}
+
+        total_pool = 0
+        win_pool = 0
+        win_bets = []
+        for opt in options:
+            bets_list = await get_bets_by_option(event_id, opt["id"])
+            opt_total = sum(b["amount"] for b in bets_list)
+            total_pool += opt_total
+            if opt["id"] == winner[0]["id"]:
+                win_pool = opt_total
+                win_bets = bets_list
+
+        if total_pool <= 0:
+            await set_betting_event_status(event_id, "settled")
+            if _is_pg:
+                await conn.execute(
+                    "UPDATE betting_events SET settled_at = to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS') WHERE id = $1",
+                    event_id,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE betting_events SET settled_at = datetime('now', 'localtime') WHERE id = ?",
+                    (event_id,),
+                )
+                await conn.commit()
+            return {"ok": True, "total_pool": 0, "payouts": [], "commission": 0, "net_pool": 0}
+
+        commission = total_pool * ev["commission_pct"] // 100
+        net_pool = total_pool - commission
+
+        payouts = []
+        if win_pool > 0 and win_bets:
+            for b in win_bets:
+                share = b["amount"] * net_pool // win_pool
+                if share > 0:
+                    await update_balance(b["user_id"], share, ev["chat_id"])
+                    payouts.append({"user_id": b["user_id"], "amount": share, "bet": b["amount"]})
+
+        if _is_pg:
+            await conn.execute(
+                "UPDATE betting_events SET status = 'settled', settled_at = to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS') WHERE id = $1",
+                event_id,
+            )
+        else:
+            await conn.execute(
+                "UPDATE betting_events SET status = 'settled', settled_at = datetime('now', 'localtime') WHERE id = ?",
+                (event_id,),
+            )
+            await conn.commit()
+
+        return {
+            "ok": True,
+            "total_pool": total_pool,
+            "commission": commission,
+            "net_pool": net_pool,
+            "win_pool": win_pool,
+            "payouts": payouts,
+        }
+    finally:
+        await conn.close()
+
+
+async def get_bets_by_option(event_id: int, option_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM bets WHERE event_id = $1 AND option_id = $2", event_id, option_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM bets WHERE event_id = ? AND option_id = ?", (event_id, option_id),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_betting_history(chat_id: int, limit: int = 5) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT * FROM betting_events WHERE chat_id = $1 AND status = 'settled' ORDER BY settled_at DESC LIMIT $2",
+                chat_id, limit,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM betting_events WHERE chat_id = ? AND status = 'settled' ORDER BY settled_at DESC LIMIT ?",
+                (chat_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def delete_bet(bet_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("DELETE FROM bets WHERE id = $1", bet_id)
+            return "DELETE 1" in (result or "")
+        else:
+            cursor = await conn.execute("DELETE FROM bets WHERE id = ?", (bet_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def get_all_event_bets(event_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT b.id, b.user_id, b.amount, b.option_id, bo.label FROM bets b JOIN betting_options bo ON bo.id = b.option_id WHERE b.event_id = $1 ORDER BY b.id",
+                event_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT b.id, b.user_id, b.amount, b.option_id, bo.label FROM bets b JOIN betting_options bo ON bo.id = b.option_id WHERE b.event_id = ? ORDER BY b.id",
+                (event_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_event_bets_by_user(event_id: int, user_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT b.*, bo.label FROM bets b JOIN betting_options bo ON bo.id = b.option_id WHERE b.event_id = $1 AND b.user_id = $2",
+                event_id, user_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT b.*, bo.label FROM bets b JOIN betting_options bo ON bo.id = b.option_id WHERE b.event_id = ? AND b.user_id = ?",
+                (event_id, user_id),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
