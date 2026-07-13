@@ -156,7 +156,8 @@ async def cmd_betting(message: Message):
             ]
             if result["payouts"]:
                 total_win = sum(p["amount"] for p in result["payouts"])
-                lines.append(f"💎 Каждому: ${result['payouts'][0]['amount']:,}")
+                avg = total_win // len(result["payouts"])
+                lines.append(f"💎 Выплачено всего: ${total_win:,} (среднее ${avg:,})")
             await message.reply("\n".join(lines), parse_mode="HTML")
             return
 
@@ -247,7 +248,7 @@ async def cmd_betting(message: Message):
         lines.append("")
     lines.append("━━ <b>Как играть</b> ━━")
     lines.append("🎯 <code>!ставка ID_СОБЫТИЯ ID_ИСХОДА СУММА</code> — сделать ставку")
-    lines.append("📊 Общий пул умножается на 9 и делится поровну между победителями")
+    lines.append("📊 Общий пул умножается на 9 и делится между победителями пропорционально ставке")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 

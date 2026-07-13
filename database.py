@@ -5146,9 +5146,9 @@ async def settle_betting_event(event_id: int) -> dict:
 
         payouts = []
         if win_pool > 0 and win_bets:
-            share = prize_pool // len(win_bets)
-            if share > 0:
-                for b in win_bets:
+            for b in win_bets:
+                share = b["amount"] * prize_pool // win_pool
+                if share > 0:
                     await update_balance(b["user_id"], share, ev["chat_id"])
                     payouts.append({"user_id": b["user_id"], "amount": share, "bet": b["amount"]})
 
