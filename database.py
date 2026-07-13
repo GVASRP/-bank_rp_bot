@@ -352,6 +352,20 @@ async def init_db():
             )
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS insurance (
+                id SERIAL PRIMARY KEY,
+                vehicle_id INTEGER NOT NULL,
+                owner_telegram_id BIGINT NOT NULL,
+                coverage_type TEXT DEFAULT 'standard',
+                coverage_percent INTEGER NOT NULL DEFAULT 80,
+                premium_paid INTEGER NOT NULL DEFAULT 0,
+                vehicle_value INTEGER NOT NULL DEFAULT 0,
+                start_date TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+                end_date TEXT,
+                status TEXT DEFAULT 'active'
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS job_roles (
                 id SERIAL PRIMARY KEY,
                 chat_id BIGINT NOT NULL DEFAULT 0,
@@ -596,6 +610,20 @@ async def init_db():
                     option_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS insurance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vehicle_id INTEGER NOT NULL,
+                    owner_telegram_id INTEGER NOT NULL,
+                    coverage_type TEXT DEFAULT 'standard',
+                    coverage_percent INTEGER NOT NULL DEFAULT 80,
+                    premium_paid INTEGER NOT NULL DEFAULT 0,
+                    vehicle_value INTEGER NOT NULL DEFAULT 0,
+                    start_date TEXT DEFAULT (datetime('now', 'localtime')),
+                    end_date TEXT,
+                    status TEXT DEFAULT 'active'
                 )
             """)
             try:
@@ -5233,5 +5261,189 @@ async def get_event_bets_by_user(event_id: int, user_id: int) -> list:
             )
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# ── Insurance functions ──
+
+COVERAGE_TYPES = {
+    "базовый": {"pct": 50, "cost_pct": 5},
+    "стандарт": {"pct": 80, "cost_pct": 10},
+    "премиум": {"pct": 100, "cost_pct": 20},
+}
+
+
+async def buy_insurance(vehicle_id: int, user_id: int, coverage_type: str) -> dict:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow("SELECT * FROM vehicles WHERE id = $1 AND owner_telegram_id = $2 AND status = 'sold'", vehicle_id, user_id)
+        else:
+            cursor = await conn.execute("SELECT * FROM vehicles WHERE id = ? AND owner_telegram_id = ? AND status = 'sold'", (vehicle_id, user_id))
+            row = await cursor.fetchone()
+        if not row:
+            return {"ok": False, "error": "Авто не найдено или не принадлежит вам"}
+        v = dict(row)
+
+        ct = COVERAGE_TYPES.get(coverage_type)
+        if not ct:
+            return {"ok": False, "error": "Тип страховки: базовый/стандарт/премиум"}
+
+        if _is_pg:
+            existing = await conn.fetchrow("SELECT id FROM insurance WHERE vehicle_id = $1 AND status = 'active'", vehicle_id)
+        else:
+            cursor = await conn.execute("SELECT id FROM insurance WHERE vehicle_id = ? AND status = 'active'", (vehicle_id,))
+            existing = await cursor.fetchone()
+        if existing:
+            return {"ok": False, "error": "На это авто уже есть активная страховка"}
+
+        premium = v["price"] * ct["cost_pct"] // 100
+        if premium < 1:
+            premium = 1
+
+        if _is_pg:
+            row = await conn.fetchrow(
+                "INSERT INTO insurance (vehicle_id, owner_telegram_id, coverage_type, coverage_percent, premium_paid, vehicle_value, end_date) "
+                "VALUES ($1, $2, $3, $4, $5, $6, to_char(NOW() + INTERVAL '30 days', 'YYYY-MM-DD HH24:MI:SS')) RETURNING id",
+                vehicle_id, user_id, coverage_type, ct["pct"], premium, v["price"],
+            )
+            ins_id = row["id"]
+        else:
+            cursor = await conn.execute(
+                "INSERT INTO insurance (vehicle_id, owner_telegram_id, coverage_type, coverage_percent, premium_paid, vehicle_value, end_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+30 days'))",
+                (vehicle_id, user_id, coverage_type, ct["pct"], premium, v["price"]),
+            )
+            await conn.commit()
+            ins_id = cursor.lastrowid
+
+        return {
+            "ok": True,
+            "ins_id": ins_id,
+            "vehicle": f"{v['year']} {v['make']} {v['model']}",
+            "coverage": f"{coverage_type} ({ct['pct']}%)",
+            "premium": premium,
+            "value": v["price"],
+        }
+    finally:
+        await conn.close()
+
+
+async def get_user_insurances(user_id: int) -> list:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            rows = await conn.fetch(
+                "SELECT i.*, v.make, v.model, v.year FROM insurance i JOIN vehicles v ON v.id = i.vehicle_id WHERE i.owner_telegram_id = $1 ORDER BY i.id DESC",
+                user_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT i.*, v.make, v.model, v.year FROM insurance i JOIN vehicles v ON v.id = i.vehicle_id WHERE i.owner_telegram_id = ? ORDER BY i.id DESC",
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_insurance(insurance_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT i.*, v.make, v.model, v.year FROM insurance i JOIN vehicles v ON v.id = i.vehicle_id WHERE i.id = $1",
+                insurance_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT i.*, v.make, v.model, v.year FROM insurance i JOIN vehicles v ON v.id = i.vehicle_id WHERE i.id = ?",
+                (insurance_id,),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def process_insurance_payout(insurance_id: int) -> dict:
+    conn = await get_conn()
+    try:
+        ins = await get_insurance(insurance_id)
+        if not ins:
+            return {"ok": False, "error": "Страховка не найдена"}
+        if ins["status"] != "active":
+            return {"ok": False, "error": f"Статус: {ins['status']}"}
+
+        payout = ins["vehicle_value"] * ins["coverage_percent"] // 100
+        user_id = ins["owner_telegram_id"]
+        vehicle_id = ins["vehicle_id"]
+
+        if _is_pg:
+            await conn.execute("UPDATE insurance SET status = 'claimed' WHERE id = $1", insurance_id)
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE id = $1 AND status = 'sold'", vehicle_id)
+        else:
+            await conn.execute("UPDATE insurance SET status = 'claimed' WHERE id = ?", (insurance_id,))
+            await conn.execute("UPDATE vehicles SET owner_telegram_id = NULL, org_id = NULL, status = 'available', chat_id = 0 WHERE id = ? AND status = 'sold'", (vehicle_id,))
+            await conn.commit()
+
+        veh_chat_id = 0
+        if _is_pg:
+            row = await conn.fetchrow("SELECT chat_id FROM vehicles WHERE id = $1", vehicle_id)
+            if row:
+                veh_chat_id = row["chat_id"]
+        else:
+            cursor = await conn.execute("SELECT chat_id FROM vehicles WHERE id = ?", (vehicle_id,))
+            row = await cursor.fetchone()
+            if row:
+                veh_chat_id = row["chat_id"]
+
+        await update_balance(user_id, payout, veh_chat_id)
+        await add_transaction("insurance_payout", None, user_id, payout,
+                              f"Страховая выплата #{insurance_id} — {ins.get('year','')} {ins.get('make','')} {ins.get('model','')} (${payout:,})")
+
+        return {
+            "ok": True,
+            "ins_id": insurance_id,
+            "user_id": user_id,
+            "vehicle": f"{ins.get('year','')} {ins.get('make','')} {ins.get('model','')}",
+            "payout": payout,
+            "coverage_pct": ins["coverage_percent"],
+        }
+    finally:
+        await conn.close()
+
+
+async def delete_insurance(insurance_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            result = await conn.execute("DELETE FROM insurance WHERE id = $1", insurance_id)
+            return "DELETE 1" in (result or "")
+        else:
+            cursor = await conn.execute("DELETE FROM insurance WHERE id = ?", (insurance_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def get_vehicle_insurance(vehicle_id: int) -> dict | None:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT i.*, v.make, v.model, v.year FROM insurance i JOIN vehicles v ON v.id = i.vehicle_id WHERE i.vehicle_id = $1 AND i.status = 'active'",
+                vehicle_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT i.*, v.make, v.model, v.year FROM insurance i JOIN vehicles v ON v.id = i.vehicle_id WHERE i.vehicle_id = ? AND i.status = 'active'",
+                (vehicle_id,),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
     finally:
         await conn.close()

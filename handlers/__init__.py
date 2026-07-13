@@ -9,6 +9,7 @@ from .trailers import router as trailer_router
 from .orgs import router as org_router
 from .businesses import router as businesses_router
 from .betting import router as betting_router
+from .insurance import router as insurance_router
 
 router = Router()
-router.include_routers(start_router, user_router, admin_router, game_router, salary_router, fuel_router, trailer_router, org_router, businesses_router, betting_router)
+router.include_routers(start_router, user_router, admin_router, game_router, salary_router, fuel_router, trailer_router, org_router, businesses_router, betting_router, insurance_router)
