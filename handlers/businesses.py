@@ -21,6 +21,7 @@ from database import (
     get_business_profit,
     order_business_materials,
     confirm_business_delivery,
+    get_businesses_by_manager,
     update_balance,
     add_transaction,
     pay_from_org,
@@ -561,15 +562,11 @@ async def cmd_confirm_materials(message: Message):
         await message.reply("❌ Укажите номер из списка")
         return
 
-    businesses = await get_user_businesses(message.from_user.id, chat_id=message.chat.id)
+    businesses = await get_businesses_by_manager(message.from_user.id)
     if pos < 1 or pos > len(businesses):
         await message.reply(f"❌ Бизнес #{pos} не найден")
         return
     b = businesses[pos - 1]
-
-    if b.get("manager_telegram_id") != message.from_user.id:
-        await message.reply("❌ Только менеджер может подтвердить доставку")
-        return
 
     ok, err_msg = await confirm_business_delivery(b["id"], message.from_user.id)
     if not ok:

@@ -70,7 +70,7 @@ async def cmd_insurance(message: Message):
             await delete_insurance(result["ins_id"])
             await message.reply(
                 f"❌ Недостаточно средств. Нужно ${premium:,}, у вас {format_amount(balance)}\n"
-                f"💰 Страховка <b>{COVERAGE_NAMES[coverage_type]}</b> стоит {ct_info['cost_pct']}% от цены авто",
+                f"💰 Взнос за <b>{COVERAGE_NAMES[coverage_type]}</b> — {ct_info['cost_pct']}% от цены авто",
                 parse_mode="HTML",
             )
             return
@@ -82,7 +82,7 @@ async def cmd_insurance(message: Message):
             f"✅ <b>Страховка оформлена!</b>\n"
             f"🚗 {result['vehicle']}\n"
             f"📄 Тип: {COVERAGE_NAMES[coverage_type]} ({result['coverage']})\n"
-            f"💰 Стоимость: ${premium:,}\n"
+            f"💰 Взнос: ${premium:,}\n"
             f"💎 Покрытие: до ${result['value'] * ct_info['pct'] // 100:,}\n"
             f"📅 Действует 30 дней",
             parse_mode="HTML",
@@ -98,9 +98,9 @@ async def cmd_insurance(message: Message):
             "━━ <b>Как оформить:</b> ━━\n"
             "<code>!страховка ID_АВТО [базовый|стандарт|премиум]</code>\n\n"
             "━━ <b>Типы</b> ━━\n"
-            "🟡 Базовый — 50% стоимости, премия 5%\n"
-            "🟠 Стандарт — 80% стоимости, премия 10%\n"
-            "🔴 Премиум — 100% стоимости, премия 20%\n"
+            "🟡 Базовый — 50% стоимости, взнос 5% от цены авто\n"
+            "🟠 Стандарт — 80% стоимости, взнос 10%\n"
+            "🔴 Премиум — 100% стоимости, взнос 20%\n"
             "📅 Срок действия: 30 дней\n\n"
             "━━ <b>Админ:</b> ━━\n"
             "<code>!страховая_выплата ID</code> — выплатить\n"

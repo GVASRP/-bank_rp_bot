@@ -4662,12 +4662,12 @@ async def get_businesses_by_manager(manager_id: int) -> list:
     try:
         if _is_pg:
             rows = await conn.fetch(
-                BUSINESS_SELECT + " WHERE b.manager_telegram_id = $1 AND b.manager_salary > 0",
+                BUSINESS_SELECT + " WHERE b.manager_telegram_id = $1",
                 manager_id,
             )
         else:
             cursor = await conn.execute(
-                BUSINESS_SELECT + " WHERE b.manager_telegram_id = ? AND b.manager_salary > 0",
+                BUSINESS_SELECT + " WHERE b.manager_telegram_id = ?",
                 (manager_id,),
             )
             rows = await cursor.fetchall()
