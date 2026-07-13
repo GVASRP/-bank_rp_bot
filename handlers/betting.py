@@ -8,7 +8,7 @@ from database import (
     set_betting_event_status, add_betting_option, get_betting_options,
     set_winning_option, place_bet, settle_betting_event,
     get_event_bets_by_user, get_betting_history,
-    get_all_event_bets, delete_bet,
+    get_all_event_bets, delete_bet, cancel_bet,
 )
 from utils import format_amount, is_admin, get_user_mention
 
@@ -248,8 +248,33 @@ async def cmd_betting(message: Message):
         lines.append("")
     lines.append("━━ <b>Как играть</b> ━━")
     lines.append("🎯 <code>!ставка ID_СОБЫТИЯ ID_ИСХОДА СУММА</code> — сделать ставку")
-    lines.append("📊 Общий пул умножается на 9 и делится между победителями пропорционально ставке")
+    lines.append("↩️ <code>!отменить_ставку ID</code> — отменить свою ставку")
+    lines.append("📊 Общий пул ×9, делится пропорционально ставке")
     await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("отменить_ставку", prefix="!/"))
+async def cmd_cancel_bet(message: Message):
+    await get_or_create_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.reply("❌ Использование: <code>!отменить_ставку ID</code>", parse_mode="HTML")
+        return
+    try:
+        bid = int(parts[1])
+    except ValueError:
+        await message.reply("❌ ID ставки должен быть числом")
+        return
+    result = await cancel_bet(bid, message.from_user.id)
+    if not result["ok"]:
+        await message.reply(f"❌ {result['error']}")
+        return
+    await message.reply(
+        f"✅ Ставка <b>#{bid}</b> отменена\n"
+        f"🏟 {result['title']}\n"
+        f"💰 ${result['amount']:,} возвращены на баланс",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("удалить_ставку", prefix="!/"))

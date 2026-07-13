@@ -5225,6 +5225,47 @@ async def delete_bet(bet_id: int) -> bool:
         await conn.close()
 
 
+async def cancel_bet(bet_id: int, user_id: int) -> dict:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            row = await conn.fetchrow(
+                "SELECT b.*, e.status as event_status, e.chat_id, e.title FROM bets b JOIN betting_events e ON e.id = b.event_id WHERE b.id = $1 FOR UPDATE",
+                bet_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT b.*, e.status as event_status, e.chat_id, e.title FROM bets b JOIN betting_events e ON e.id = b.event_id WHERE b.id = ?",
+                (bet_id,),
+            )
+            row = await cursor.fetchone()
+        if not row:
+            return {"ok": False, "error": "Ставка не найдена"}
+        if row["user_id"] != user_id:
+            return {"ok": False, "error": "Это не ваша ставка"}
+        if row["event_status"] != "open":
+            return {"ok": False, "error": "Приём ставок уже закрыт, отменить нельзя"}
+
+        amount = row["amount"]
+        chat_id = row["chat_id"]
+        title = row["title"]
+
+        if _is_pg:
+            await conn.execute("DELETE FROM bets WHERE id = $1", bet_id)
+        else:
+            await conn.execute("DELETE FROM bets WHERE id = ?", (bet_id,))
+            await conn.commit()
+
+        # Re-use existing helper with a new connection (simplest path)
+        await update_balance(user_id, amount, chat_id)
+        await add_transaction("bet_cancel", None, user_id, amount,
+                              f"Отмена ставки #{bet_id} на {title} (${amount:,})")
+
+        return {"ok": True, "amount": amount, "title": title, "bet_id": bet_id}
+    finally:
+        await conn.close()
+
+
 async def get_all_event_bets(event_id: int) -> list:
     conn = await get_conn()
     try:
