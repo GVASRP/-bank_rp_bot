@@ -151,12 +151,12 @@ async def cmd_betting(message: Message):
             lines = [
                 f"💰 <b>Выплата по событию #{eid}</b>",
                 f"💵 Общий пул: ${result['total_pool']:,}",
-                f"📊 Комиссия ({await get_betting_event(eid) and (await get_betting_event(eid))['commission_pct'] or 5}%): ${result['commission']:,}",
-                f"💎 Чистый пул: ${result['net_pool']:,}",
-                f"🎯 Пул победителей: ${result['win_pool']:,}",
+                f"🎰 Призовой фонд (x9): ${result['prize_pool']:,}",
+                f"👑 Победителей: {len(result['payouts'])}",
             ]
             if result["payouts"]:
-                lines.append(f"\n✅ Выплачено {len(result['payouts'])} игрокам")
+                total_win = sum(p["amount"] for p in result["payouts"])
+                lines.append(f"💎 Каждому: ${result['payouts'][0]['amount']:,}")
             await message.reply("\n".join(lines), parse_mode="HTML")
             return
 
@@ -218,7 +218,7 @@ async def cmd_betting(message: Message):
     if not events:
         await message.reply(
             "🏟 <b>Ставки на спорт</b>\n\n"
-            "Нет активных событий. Ждите новых матчей!\n\n"
+            "Нет активных событий. Ждите новых заездов!\n\n"
             "━━ <b>Команды админа:</b> ━━\n"
             "<code>!ставки создать НАЗВАНИЕ [комиссия%]</code>\n"
             "<code>!ставки исход ID НАЗВАНИЕ</code>\n"
@@ -243,11 +243,11 @@ async def cmd_betting(message: Message):
             opt_lines.append(f"  {winner_mark}#{o['id']} — {o['label']}")
         lines.append(f"{format_event(ev)}")
         lines.extend(opt_lines)
-        lines.append(f"  📊 Комиссия: {ev['commission_pct']}% | Исходов: {len(opts)}")
+        lines.append(f"  📊 Исходов: {len(opts)}")
         lines.append("")
     lines.append("━━ <b>Как играть</b> ━━")
     lines.append("🎯 <code>!ставка ID_СОБЫТИЯ ID_ИСХОДА СУММА</code> — сделать ставку")
-    lines.append("📊 Пул (общий котёл) делится между победителями минус комиссия")
+    lines.append("📊 Общий пул умножается на 9 и делится поровну между победителями")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 

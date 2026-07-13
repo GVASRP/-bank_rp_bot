@@ -5142,14 +5142,13 @@ async def settle_betting_event(event_id: int) -> dict:
                 await conn.commit()
             return {"ok": True, "total_pool": 0, "payouts": [], "commission": 0, "net_pool": 0}
 
-        commission = total_pool * ev["commission_pct"] // 100
-        net_pool = total_pool - commission
+        prize_pool = total_pool * 9
 
         payouts = []
         if win_pool > 0 and win_bets:
-            for b in win_bets:
-                share = b["amount"] * net_pool // win_pool
-                if share > 0:
+            share = prize_pool // len(win_bets)
+            if share > 0:
+                for b in win_bets:
                     await update_balance(b["user_id"], share, ev["chat_id"])
                     payouts.append({"user_id": b["user_id"], "amount": share, "bet": b["amount"]})
 
@@ -5168,8 +5167,7 @@ async def settle_betting_event(event_id: int) -> dict:
         return {
             "ok": True,
             "total_pool": total_pool,
-            "commission": commission,
-            "net_pool": net_pool,
+            "prize_pool": prize_pool,
             "win_pool": win_pool,
             "payouts": payouts,
         }
