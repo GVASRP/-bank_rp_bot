@@ -1,5 +1,6 @@
 import random
 import time
+from datetime import datetime
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -10,6 +11,7 @@ from utils import format_amount
 
 router = Router()
 
+DAILY_LIMIT = 15
 SLOT_EMOJIS = ["🍒", "🍋", "🍊", "🍇", "💎", "🎰"]
 SLOT_WEIGHTS = [30, 25, 20, 15, 8, 2]
 
@@ -49,6 +51,19 @@ async def get_cooldown() -> float:
 _last_bet: dict[int, float] = {}
 
 
+async def daily_bet_count(uid: int) -> int:
+    key = f"casino_daily:{uid}:{datetime.now().strftime('%Y-%m-%d')}"
+    raw = await get_config(key)
+    return int(raw) if raw else 0
+
+
+async def increment_daily(uid: int) -> int:
+    key = f"casino_daily:{uid}:{datetime.now().strftime('%Y-%m-%d')}"
+    cnt = await daily_bet_count(uid) + 1
+    await set_config(key, str(cnt))
+    return cnt
+
+
 async def check_cooldown(uid: int) -> float | None:
     cd = await get_cooldown()
     last = _last_bet.get(uid, 0)
@@ -77,6 +92,7 @@ async def cmd_casino(message: Message):
         f"━━ <b>Правила</b> ━━\n"
         f"💎 Джекпот: ${jackpot:,}\n"
         f"📊 Макс. ставка: ${MAX_BET:,}\n"
+        f"📅 Лимит: {DAILY_LIMIT} игр в день\n"
         f"📊 {JACKPOT_FUND_PCT}% каждого проигрыша уходит в джекпот\n"
         f"⏳ Задержка: {await get_cooldown():.0f} сек",
         parse_mode="HTML",
@@ -89,6 +105,9 @@ async def cmd_coinflip(message: Message):
     remaining = await check_cooldown(uid)
     if remaining:
         await message.reply(f"⏳ Подождите {remaining:.0f} сек")
+        return
+    if await daily_bet_count(uid) >= DAILY_LIMIT:
+        await message.reply(f"❌ Лимит на сегодня — {DAILY_LIMIT} игр")
         return
 
     await get_or_create_user(uid, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
@@ -118,6 +137,7 @@ async def cmd_coinflip(message: Message):
         return
 
     _last_bet[uid] = time.time()
+    await increment_daily(uid)
     result = random.randint(1, 2)
     win = result == choice
     if win:
@@ -150,6 +170,9 @@ async def cmd_dice(message: Message):
     if remaining:
         await message.reply(f"⏳ Подождите {remaining:.0f} сек")
         return
+    if await daily_bet_count(uid) >= DAILY_LIMIT:
+        await message.reply(f"❌ Лимит на сегодня — {DAILY_LIMIT} игр")
+        return
 
     await get_or_create_user(uid, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
     parts = message.text.split()
@@ -178,6 +201,7 @@ async def cmd_dice(message: Message):
         return
 
     _last_bet[uid] = time.time()
+    await increment_daily(uid)
     result = random.randint(1, 6)
     win = result == choice
     if win:
@@ -210,6 +234,9 @@ async def cmd_slot(message: Message):
     if remaining:
         await message.reply(f"⏳ Подождите {remaining:.0f} сек")
         return
+    if await daily_bet_count(uid) >= DAILY_LIMIT:
+        await message.reply(f"❌ Лимит на сегодня — {DAILY_LIMIT} игр")
+        return
 
     await get_or_create_user(uid, message.from_user.username or "", message.from_user.first_name or "", message.chat.id)
     parts = message.text.split()
@@ -234,6 +261,7 @@ async def cmd_slot(message: Message):
         return
 
     _last_bet[uid] = time.time()
+    await increment_daily(uid)
     reels = [weighted_choice() for _ in range(3)]
     emojis = [SLOT_EMOJIS[r] for r in reels]
     line = "".join(emojis)
