@@ -1238,8 +1238,15 @@ async def cmd_add_car(message: Message):
     except ValueError:
         await message.reply("❌ Год и цена должны быть числами")
         return
-    miles = int(parts[5]) if len(parts) > 5 else random.randint(1000, 50000)
-    color = parts[6] if len(parts) > 6 else random.choice(["Черный", "Белый", "Синий", "Красный", "Серый", "Серебристый"])
+    if len(parts) > 5 and parts[5].isdigit():
+        miles = int(parts[5])
+        color = parts[6] if len(parts) > 6 else random.choice(["Черный", "Белый", "Синий", "Красный", "Серый", "Серебристый"])
+    elif len(parts) > 5:
+        miles = random.randint(1000, 50000)
+        color = parts[5]
+    else:
+        miles = random.randint(1000, 50000)
+        color = random.choice(["Черный", "Белый", "Синий", "Красный", "Серый", "Серебристый"])
     vin = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=17))
     license_plate = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))}-{random.randint(100,999)}"
     city = random.choice(["Милуоки", "Мадисон", "Грин-Бей", "Апплтон", "О-Клэр", "Кеноша", "Расин", "Ла-Кросс"])
