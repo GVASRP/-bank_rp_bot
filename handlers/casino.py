@@ -15,11 +15,11 @@ SLOT_WEIGHTS = [30, 25, 20, 15, 8, 2]
 
 SLOT_PAYOUTS = {
     (5, 5, 5): ("JACKPOT", None),
-    (4, 4, 4): (50, "💎💎💎 — x35"),
-    (3, 3, 3): (20, "🍇🍇🍇 — x15"),
-    (2, 2, 2): (15, "🍊🍊🍊 — x10"),
-    (1, 1, 1): (10, "🍋🍋🍋 — x8"),
-    (0, 0, 0): (5, "🍒🍒🍒 — x4"),
+    (4, 4, 4): (30, "💎💎💎 — x20"),
+    (3, 3, 3): (12, "🍇🍇🍇 — x10"),
+    (2, 2, 2): (8, "🍊🍊🍊 — x6"),
+    (1, 1, 1): (5, "🍋🍋🍋 — x4"),
+    (0, 0, 0): (3, "🍒🍒🍒 — x3"),
 }
 
 JACKPOT_FUND_PCT = 5
@@ -71,9 +71,9 @@ async def cmd_casino(message: Message):
     await message.reply(
         f"🎰 <b>Казино GreenVegas</b>\n\n"
         f"━━ <b>Игры</b> ━━\n"
-        f"🪙 <code>!монетка 1/2 СТАВКА</code> — орёл/решка (x1.9)\n"
-        f"🎲 <code>!кости 1-6 СТАВКА</code> — угадай число (x5)\n"
-        f"🎰 <code>!слот СТАВКА</code> — слот (x4..x35 + джекпот)\n\n"
+        f"🪙 <code>!монетка 1/2 СТАВКА</code> — орёл/решка (x1.7)\n"
+        f"🎲 <code>!кости 1-6 СТАВКА</code> — угадай число (x4)\n"
+        f"🎰 <code>!слот СТАВКА</code> — слот (x3..x20 + джекпот)\n\n"
         f"━━ <b>Правила</b> ━━\n"
         f"💎 Джекпот: ${jackpot:,}\n"
         f"📊 Макс. ставка: ${MAX_BET:,}\n"
@@ -121,7 +121,7 @@ async def cmd_coinflip(message: Message):
     result = random.randint(1, 2)
     win = result == choice
     if win:
-        payout = int(bet * 1.9)
+        payout = int(bet * 1.7)
         await update_balance(uid, payout, message.chat.id)
         await add_transaction("casino_win", None, uid, payout, f"Монетка — выигрыш (${payout:,})")
         await message.reply(
@@ -181,7 +181,7 @@ async def cmd_dice(message: Message):
     result = random.randint(1, 6)
     win = result == choice
     if win:
-        payout = bet * 5
+        payout = bet * 4
         await update_balance(uid, payout, message.chat.id)
         await add_transaction("casino_win", None, uid, payout, f"Кости — выигрыш x5 (${payout:,})")
         await message.reply(
@@ -271,11 +271,11 @@ async def cmd_slot(message: Message):
         same = two[0] if two[0] == two[1] else two[1] if two[1] == two[2] else None
         if same is not None:
             if same >= 4:
-                multiplier = 8
+                multiplier = 5
             elif same >= 3:
-                multiplier = 4
+                multiplier = 3
             else:
-                multiplier = 2
+                multiplier = 1
             payout = bet * multiplier
             await update_balance(uid, payout, message.chat.id)
             await add_transaction("casino_win", None, uid, payout, f"Слот — две {SLOT_EMOJIS[same]} (x{multiplier})")
