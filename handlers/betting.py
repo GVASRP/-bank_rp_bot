@@ -193,6 +193,42 @@ async def cmd_betting(message: Message):
             await message.reply("\n".join(lines), parse_mode="HTML")
             return
 
+        # ── кто ──
+        if action == "кто":
+            if not is_adm:
+                await message.reply("❌ Только для администраторов")
+                return
+            parts = message.text.split(maxsplit=2)
+            if len(parts) < 3:
+                await message.reply("❌ Использование: <code>!ставки кто ID_СОБЫТИЯ</code>", parse_mode="HTML")
+                return
+            try:
+                eid = int(parts[2])
+            except ValueError:
+                await message.reply("❌ ID события должен быть числом")
+                return
+            ev = await get_betting_event(eid)
+            if not ev or ev["chat_id"] != chat_id:
+                await message.reply("❌ Событие не найдено")
+                return
+            all_bets = await get_all_event_bets(eid)
+            if not all_bets:
+                await message.reply(f"📭 На событие <b>{ev['title']}</b> нет ставок", parse_mode="HTML")
+                return
+            opts = await get_betting_options(eid)
+            lines = [f"📋 <b>{ev['title']}</b> (всего ставок: {len(all_bets)})\n"]
+            for o in opts:
+                o_bets = [b for b in all_bets if b["option_id"] == o["id"]]
+                if not o_bets:
+                    continue
+                total = sum(b["amount"] for b in o_bets)
+                lines.append(f"━━ <b>{o['label']}</b> — ${total:,} ({(total*100)//(sum(b['amount'] for b in all_bets) or 1)}%)")
+                for b in o_bets:
+                    lines.append(f"  <b>#{b['id']}</b> id{get_user_mention(b['user_id'], str(b['user_id']))} | ${b['amount']:,}")
+                lines.append("")
+            await message.reply("\n".join(lines), parse_mode="HTML")
+            return
+
         # ── удалить ──
         if action == "удалить":
             if not is_adm:
@@ -227,6 +263,7 @@ async def cmd_betting(message: Message):
             "<code>!ставки результат ID ID_ИСХОДА</code>\n"
             "<code>!ставки выплатить ID</code>\n"
             "<code>!ставки список ID</code> — все ставки\n"
+            "<code>!ставки кто ID</code> — ставки по исходам\n"
             "<code>!ставки удалить ID</code> — удалить ставку без возврата",
             parse_mode="HTML",
         )
@@ -250,6 +287,8 @@ async def cmd_betting(message: Message):
     lines.append("🎯 <code>!ставка ID_СОБЫТИЯ ID_ИСХОДА СУММА</code> — сделать ставку")
     lines.append("↩️ <code>!отменить_ставку ID</code> — отменить свою ставку")
     lines.append("📊 Общий пул ×9, делится пропорционально ставке")
+    lines.append("━━ <b>Админ:</b> ━━")
+    lines.append("👁 <code>!ставки кто ID</code> — кто на что поставил")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 
