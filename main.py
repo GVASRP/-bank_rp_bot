@@ -36,7 +36,7 @@ async def run_web_server():
 async def on_startup(bot):
     logger.info("Auto-poster: creating background task")
     asyncio.create_task(auto_poster_loop(bot))
-    await set_config("container_min_boost", "0")
+    await set_config("container_min_boost", "10000000")
 
     bot_me = await bot.get_me()
     bot_id = bot_me.id
