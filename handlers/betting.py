@@ -9,6 +9,7 @@ from database import (
     set_winning_option, place_bet, settle_betting_event,
     get_event_bets_by_user, get_betting_history,
     get_all_event_bets, delete_bet, cancel_bet,
+    delete_betting_event,
 )
 from utils import format_amount, is_admin, get_user_mention
 
@@ -250,6 +251,31 @@ async def cmd_betting(message: Message):
             await message.reply(f"✅ Ставка <b>#{bid}</b> удалена (без возврата)", parse_mode="HTML")
             return
 
+        # ── удалить_событие ──
+        if action == "удалить_событие":
+            if not is_adm:
+                await message.reply("❌ Только для администраторов")
+                return
+            parts = message.text.split(maxsplit=2)
+            if len(parts) < 3:
+                await message.reply("❌ Использование: <code>!ставки удалить_событие ID</code>", parse_mode="HTML")
+                return
+            try:
+                eid = int(parts[2])
+            except ValueError:
+                await message.reply("❌ ID события должен быть числом")
+                return
+            ev = await get_betting_event(eid)
+            if not ev or ev["chat_id"] != chat_id:
+                await message.reply("❌ Событие не найдено")
+                return
+            ok = await delete_betting_event(eid)
+            if not ok:
+                await message.reply("❌ Не удалось удалить событие")
+                return
+            await message.reply(f"🗑 Событие <b>#{eid} {ev['title']}</b> полностью удалено со всеми ставками и исходами", parse_mode="HTML")
+            return
+
     # ── Список активных событий ──
     events = await get_active_betting_events(chat_id)
     if not events:
@@ -264,7 +290,8 @@ async def cmd_betting(message: Message):
             "<code>!ставки выплатить ID</code>\n"
             "<code>!ставки список ID</code> — все ставки\n"
             "<code>!ставки кто ID</code> — ставки по исходам\n"
-            "<code>!ставки удалить ID</code> — удалить ставку без возврата",
+             "<code>!ставки удалить ID</code> — удалить ставку без возврата\n"
+             "<code>!ставки удалить_событие ID</code> — удалить событие целиком",
             parse_mode="HTML",
         )
         return

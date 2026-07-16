@@ -5013,6 +5013,24 @@ async def set_betting_event_status(event_id: int, status: str) -> bool:
         await conn.close()
 
 
+async def delete_betting_event(event_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        if _is_pg:
+            await conn.execute("DELETE FROM bets WHERE event_id = $1", event_id)
+            await conn.execute("DELETE FROM betting_options WHERE event_id = $1", event_id)
+            result = await conn.execute("DELETE FROM betting_events WHERE id = $1", event_id)
+            return "DELETE 1" in (result or "")
+        else:
+            await conn.execute("DELETE FROM bets WHERE event_id = ?", (event_id,))
+            await conn.execute("DELETE FROM betting_options WHERE event_id = ?", (event_id,))
+            cursor = await conn.execute("DELETE FROM betting_events WHERE id = ?", (event_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
 async def add_betting_option(event_id: int, label: str) -> int:
     conn = await get_conn()
     try:
