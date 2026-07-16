@@ -5144,14 +5144,7 @@ async def settle_betting_event(event_id: int) -> dict:
 
         prize_pool = total_pool * 9
 
-        payouts = []
-        if win_pool > 0 and win_bets:
-            for b in win_bets:
-                share = b["amount"] * prize_pool // win_pool
-                if share > 0:
-                    await update_balance(b["user_id"], share, ev["chat_id"])
-                    payouts.append({"user_id": b["user_id"], "amount": share, "bet": b["amount"]})
-
+        # 1) Сразу сеттлим событие — предотвращает повторные выплаты
         if _is_pg:
             await conn.execute(
                 "UPDATE betting_events SET status = 'settled', settled_at = to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS') WHERE id = $1",
@@ -5163,6 +5156,23 @@ async def settle_betting_event(event_id: int) -> dict:
                 (event_id,),
             )
             await conn.commit()
+
+        # 2) Выплачиваем победителей — каждый в try/except
+        payouts = []
+        if win_pool > 0 and win_bets:
+            for b in win_bets:
+                share = b["amount"] * prize_pool // win_pool
+                if share > 0:
+                    try:
+                        ok = await update_balance(b["user_id"], share, ev["chat_id"])
+                        if ok:
+                            await add_transaction(
+                                "betting_payout", None, b["user_id"], share,
+                                f"Выплата по событию #{event_id}: {share:,}",
+                            )
+                            payouts.append({"user_id": b["user_id"], "amount": share, "bet": b["amount"]})
+                    except Exception:
+                        pass  # пользователь всё равно может получить выплату вручную
 
         return {
             "ok": True,
