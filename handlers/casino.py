@@ -11,7 +11,7 @@ from utils import format_amount
 
 router = Router()
 
-DAILY_LIMIT = 15
+DAILY_LIMIT = 30
 SLOT_EMOJIS = ["🍒", "🍋", "🍊", "🍇", "💎", "🎰"]
 SLOT_WEIGHTS = [30, 25, 20, 15, 8, 2]
 
