@@ -502,22 +502,18 @@ async def cmd_auto_posts(message: Message):
             f"Статус: {trailer_status} | Интервал: {trailer_interval} мин | Канал: {trailer_channel}\n"
             f"━ 🏪 <b>Бизнесы:</b>\n"
             f"Статус: {biz_status} | Интервал: {biz_interval} мин | Канал: {biz_channel}\n\n"
-            f"🚗 <b>Команды для машин:</b>\n"
-            f"<code>!объявления машины вкл</code> — включить\n"
-            f"<code>!объявления машины интервал 1</code> — интервал\n"
-            f"<code>!объявления машины тест</code> — тест\n\n"
-            f"🏠 <b>Команды для домов:</b>\n"
-            f"<code>!объявления дома вкл</code> — включить\n"
-            f"<code>!объявления дома интервал 1</code> — интервал\n"
-            f"<code>!объявления дома тест</code> — тест\n\n"
-            f"🚛 <b>Команды для прицепов:</b>\n"
-            f"<code>!объявления прицепы вкл</code> — включить\n"
-            f"<code>!объявления прицепы интервал 1</code> — интервал\n"
-            f"<code>!объявления прицепы тест</code> — тест\n\n"
-            f"🏪 <b>Команды для бизнесов:</b>\n"
-            f"<code>!объявления бизнесы вкл</code> — включить\n"
-            f"<code>!объявления бизнесы интервал 1</code> — интервал\n"
-            f"<code>!объявления бизнесы тест</code> — тест\n\n"
+             f"🚗 <b>Команды для машин:</b>\n"
+             f"<code>!объявления машины вкл</code> — включить\n"
+             f"<code>!объявления машины интервал 1</code> — интервал\n\n"
+             f"🏠 <b>Команды для домов:</b>\n"
+             f"<code>!объявления дома вкл</code> — включить\n"
+             f"<code>!объявления дома интервал 1</code> — интервал\n\n"
+             f"🚛 <b>Команды для прицепов:</b>\n"
+             f"<code>!объявления прицепы вкл</code> — включить\n"
+             f"<code>!объявления прицепы интервал 1</code> — интервал\n\n"
+             f"🏪 <b>Команды для бизнесов:</b>\n"
+             f"<code>!объявления бизнесы вкл</code> — включить\n"
+             f"<code>!объявления бизнесы интервал 1</code> — интервал\n\n"
             f"📡 <b>Общее:</b>\n"
             f"<code>!объявления канал @channel</code> — канал для машин\n"
             f"<code>!объявления дома_канал @channel</code> — канал для домов\n"
@@ -699,10 +695,7 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_trailers_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления прицепов выключены")
         elif sub == "тест":
-            t_topic_raw = await get_config(f"poster_trailers_topic:{chat_id}")
-            t_topic = int(t_topic_raw) if t_topic_raw else None
-            result = await force_post_trailer(message.bot, chat_id, t_topic)
-            await message.reply(result, parse_mode="HTML")
+            await message.reply("❌ Тест-режим отключён", parse_mode="HTML")
         elif sub == "интервал" and len(args) >= 4:
             try:
                 minutes = int(args[3])
@@ -711,7 +704,7 @@ async def cmd_auto_posts(message: Message):
             except ValueError:
                 await message.reply("❌ Укажите число минут")
         else:
-            await message.reply("❌ Использование: <code>!объявления прицепы [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
+            await message.reply("❌ Использование: <code>!объявления прицепы [вкл|выкл|интервал N]</code>", parse_mode="HTML")
     elif action == "машины" and len(args) >= 3:
         sub = args[2]
         if sub == "вкл":
@@ -725,10 +718,7 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления машин выключены")
         elif sub == "тест":
-            topic_raw = await get_config(f"poster_cars_topic:{chat_id}")
-            topic = int(topic_raw) if topic_raw else None
-            result = await force_post_one(message.bot, chat_id, topic)
-            await message.reply(result, parse_mode="HTML")
+            await message.reply("❌ Тест-режим отключён", parse_mode="HTML")
         elif sub == "интервал" and len(args) >= 4:
             try:
                 minutes = int(args[3])
@@ -737,7 +727,7 @@ async def cmd_auto_posts(message: Message):
             except ValueError:
                 await message.reply("❌ Укажите число минут")
         else:
-            await message.reply("❌ Использование: <code>!объявления машины [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
+            await message.reply("❌ Использование: <code>!объявления машины [вкл|выкл|интервал N]</code>", parse_mode="HTML")
     elif action == "дома" and len(args) >= 3:
         sub = args[2]
         if sub == "вкл":
@@ -751,10 +741,7 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_houses_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления домов выключены")
         elif sub == "тест":
-            topic_raw = await get_config(f"poster_houses_topic:{chat_id}")
-            topic = int(topic_raw) if topic_raw else None
-            result = await force_post_house(message.bot, chat_id, topic)
-            await message.reply(result, parse_mode="HTML")
+            await message.reply("❌ Тест-режим отключён", parse_mode="HTML")
         elif sub == "интервал" and len(args) >= 4:
             try:
                 minutes = int(args[3])
@@ -763,7 +750,7 @@ async def cmd_auto_posts(message: Message):
             except ValueError:
                 await message.reply("❌ Укажите число минут")
         else:
-            await message.reply("❌ Использование: <code>!объявления дома [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
+            await message.reply("❌ Использование: <code>!объявления дома [вкл|выкл|интервал N]</code>", parse_mode="HTML")
     elif action == "бизнесы" and len(args) >= 3:
         sub = args[2]
         if sub == "вкл":
@@ -777,10 +764,7 @@ async def cmd_auto_posts(message: Message):
             await set_config(f"poster_businesses_enabled:{chat_id}", "0")
             await message.reply("❌ Авто-объявления бизнесов выключены")
         elif sub == "тест":
-            b_topic_raw = await get_config(f"poster_businesses_topic:{chat_id}")
-            b_topic = int(b_topic_raw) if b_topic_raw else None
-            result = await force_post_business(message.bot, chat_id, b_topic)
-            await message.reply(result, parse_mode="HTML")
+            await message.reply("❌ Тест-режим отключён", parse_mode="HTML")
         elif sub == "интервал" and len(args) >= 4:
             try:
                 minutes = int(args[3])
@@ -789,15 +773,15 @@ async def cmd_auto_posts(message: Message):
             except ValueError:
                 await message.reply("❌ Укажите число минут")
         else:
-            await message.reply("❌ Использование: <code>!объявления бизнесы [вкл|выкл|тест|интервал N]</code>", parse_mode="HTML")
+            await message.reply("❌ Использование: <code>!объявления бизнесы [вкл|выкл|интервал N]</code>", parse_mode="HTML")
     else:
         await message.reply(
             "❌ Неизвестная команда. Используй:\n"
             "<code>!объявления</code> — статус\n"
-            "<code>!объявления машины вкл/выкл/тест/интервал N</code>\n"
-            "<code>!объявления дома вкл/выкл/тест/интервал N</code>\n"
-            "<code>!объявления прицепы вкл/выкл/тест/интервал N</code>\n"
-            "<code>!объявления бизнесы вкл/выкл/тест/интервал N</code>",
+            "<code>!объявления машины вкл/выкл/интервал N</code>\n"
+            "<code>!объявления дома вкл/выкл/интервал N</code>\n"
+            "<code>!объявления прицепы вкл/выкл/интервал N</code>\n"
+            "<code>!объявления бизнесы вкл/выкл/интервал N</code>",
             parse_mode="HTML",
         )
 
