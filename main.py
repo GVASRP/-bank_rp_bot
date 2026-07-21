@@ -52,6 +52,15 @@ async def main():
     logger.info("Инициализация базы данных...")
     await init_db()
 
+    if os.getenv("RUN_MIGRATION", "").lower() in ("1", "true", "yes"):
+        logger.info("Запуск миграции данных из дампа...")
+        try:
+            from migrate import run as run_migration
+            if await run_migration():
+                logger.info("Миграция выполнена успешно")
+        except Exception as e:
+            logger.warning("Миграция не удалась (пропускаем): %s", e)
+
     kwargs = {"token": BOT_TOKEN, "default": DefaultBotProperties(parse_mode=ParseMode.HTML)}
     if BOT_PROXY:
         logger.info("Используется прокси: %s", BOT_PROXY)
