@@ -25,7 +25,7 @@ async def run_web_server():
     app = web.Application()
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "7860"))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
@@ -48,7 +48,7 @@ async def on_startup(bot):
         logger.info("Bot user @%s (id=%d) already registered, balance=%s", bot_me.username, bot_id, existing.get("balance", 0) if existing else "?")
 
 
-async def main():
+async def main(skip_web=False):
     logger.info("Инициализация базы данных...")
     await init_db()
 
@@ -70,7 +70,8 @@ async def main():
     dp.include_router(router)
     dp.startup.register(on_startup)
 
-    await run_web_server()
+    if not skip_web:
+        await run_web_server()
 
     logger.info("Бот запущен!")
     try:

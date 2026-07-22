@@ -1,9 +1,9 @@
 ---
 title: Bank RP Bot
 emoji: 💰
-sdk: docker
-sdk_version: "1"
-app_port: 7860
+sdk: gradio
+sdk_version: "5"
+app_file: app.py
 ---
 
 # Bank RP Bot
