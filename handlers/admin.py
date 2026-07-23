@@ -1331,3 +1331,38 @@ async def cmd_recalc_credits(message: Message):
         f"📊 Ставка изменена с <b>{old_rate}%</b> на <b>{new_rate}%</b>",
         parse_mode="HTML",
     )
+
+
+@router.message(Command("разослать", prefix="!/"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_broadcast(message: Message):
+    if not await ensure_admin(message):
+        return
+
+    text = message.text.split(maxsplit=1)
+    if len(text) < 2:
+        await message.reply("❌ Использование: <code>!разослать текст</code>", parse_mode="HTML")
+        return
+
+    msg = text[1]
+    all_config = await get_config("poster_chats") or ""
+    chat_ids = [int(c) for c in all_config.split(",") if c]
+
+    if not chat_ids:
+        await message.reply("❌ Нет чатов для рассылки")
+        return
+
+    status = await message.reply(f"📤 Рассылка в {len(chat_ids)} чатов...")
+    ok = 0
+    fail = 0
+    for cid in chat_ids:
+        try:
+            await message.bot.send_message(cid, msg)
+            ok += 1
+        except Exception:
+            fail += 1
+
+    await status.edit_text(
+        f"✅ Разослано: <b>{ok}</b>\n"
+        f"❌ Ошибок: <b>{fail}</b>",
+        parse_mode="HTML",
+    )
