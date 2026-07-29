@@ -1,12 +1,29 @@
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 router = Router()
 
 
 @router.message(Command("start", "help", prefix="!/"))
 async def cmd_start(message: Message):
+    parts = message.text.split(maxsplit=1)
+    args = parts[1] if len(parts) > 1 else ""
+
+    if args.startswith("auth_"):
+        code = args.replace("auth_", "")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Allow", callback_data=f"kalten:allow:{code}"),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="kalten:cancel"),
+            ]
+        ])
+        await message.reply(
+            "Do you want to log in to KaltenGram?",
+            reply_markup=keyboard,
+        )
+        return
+
     text = (
         "╔══════════════════════════════╗\n"
         "║  🏦 <b>БАНКОВСКАЯ СИСТЕМА RP</b>  ║\n"
