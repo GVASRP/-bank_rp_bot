@@ -18,10 +18,24 @@ async def cmd_start(message: Message):
                 InlineKeyboardButton(text="❌ Cancel", callback_data="kalten:cancel"),
             ]
         ])
-        await message.reply(
-            "Do you want to log in to KaltenGram?",
-            reply_markup=keyboard,
-        )
+        if message.chat.type != "private":
+            try:
+                await message.bot.send_message(
+                    message.from_user.id,
+                    "Do you want to log in to KaltenGram?",
+                    reply_markup=keyboard,
+                )
+                await message.reply("📬 Я отправил тебе в личку подтверждение.")
+            except Exception:
+                await message.reply(
+                    "❌ Не могу написать тебе в личку. Разреши сообщения от ботов:\n"
+                    "Настройки → Конфиденциальность → Сообщения → Кто может → Все"
+                )
+        else:
+            await message.reply(
+                "Do you want to log in to KaltenGram?",
+                reply_markup=keyboard,
+            )
         return
 
     text = (
