@@ -56,8 +56,8 @@ async def close_conn():
 
 
 async def init_db():
+    conn = await get_conn()
     if _is_pg:
-        conn = await get_conn()
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -425,7 +425,6 @@ async def init_db():
         except Exception:
             pass
     else:
-        conn = await get_conn()
         try:
             await conn.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
