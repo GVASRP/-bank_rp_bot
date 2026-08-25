@@ -468,7 +468,8 @@ async def init_db():
                     interest_paid INTEGER DEFAULT 0,
                     duration_days INTEGER DEFAULT 30,
                     status TEXT DEFAULT 'active',
-                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    vehicle_id INTEGER DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS posted_listings (
                     guid TEXT PRIMARY KEY,
@@ -722,6 +723,16 @@ async def init_db():
             # Migration: add duration_days to deposits
             try:
                 await conn.execute("ALTER TABLE deposits ADD COLUMN duration_days INTEGER DEFAULT 30")
+                await conn.commit()
+            except Exception:
+                pass
+            try:
+                await conn.execute("ALTER TABLE credits ADD COLUMN vehicle_id INTEGER DEFAULT 0")
+                await conn.commit()
+            except Exception:
+                pass
+            try:
+                await conn.execute("ALTER TABLE credit_requests ADD COLUMN vehicle_id INTEGER DEFAULT 0")
                 await conn.commit()
             except Exception:
                 pass
