@@ -4,4 +4,4 @@ app = "bank-rp-bot"
   dockerfile = "Dockerfile"
 
 [env]
-  BOT_TOKEN = ""
+  BOT_TOKEN = "8948693786:AAFb_yryPIsSJqkiwMFTw7BgXlxgaSsD2z8"

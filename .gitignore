@@ -4,3 +4,4 @@ __pycache__/
 koyeb-bin/
 flyctl-bin/
 bank.db
+migrate_supabase.sql
