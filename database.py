@@ -1,5 +1,9 @@
 import os
+import asyncio
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_FILE = "bank.db"
@@ -9,12 +13,33 @@ _pg_pool = None
 _start_balance_cache = None
 
 
-async def get_conn():
+async def _init_pg_pool(retries=5, delay=3):
+    import asyncpg
     global _pg_pool
+    for attempt in range(1, retries + 1):
+        try:
+            _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, command_timeout=10)
+            logger.info("PostgreSQL подключён успешно (попытка %d)", attempt)
+            return True
+        except Exception as e:
+            logger.warning("PostgreSQL попытка %d/%d не удалась: %s", attempt, retries, e)
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    return False
+
+
+async def get_conn():
+    global _pg_pool, _is_pg
     if _is_pg:
-        import asyncpg
         if _pg_pool is None:
-            _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+            ok = await _init_pg_pool()
+            if not ok:
+                logger.error("Не удалось подключиться к PostgreSQL, переключаемся на SQLite")
+                _is_pg = False
+                import aiosqlite
+                db = await aiosqlite.connect(DATABASE_FILE)
+                db.row_factory = aiosqlite.Row
+                return db
         return await _pg_pool.acquire()
     else:
         import aiosqlite
